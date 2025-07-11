@@ -63,7 +63,7 @@ A modern weather tracking application for monitoring weather conditions in vario
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/username/weather-app.git](https://github.com/PiotrSmola/Vue-Laravel-Weather-App.git
+git clone https://github.com/PiotrSmola/Vue-Laravel-Weather-App.git
 cd weather-app
 ```
 
