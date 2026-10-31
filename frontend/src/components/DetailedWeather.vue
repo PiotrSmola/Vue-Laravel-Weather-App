@@ -1,5 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue';
+import { useUnits } from '@/composables/useUnits';
+
+const { formatTemp, formatWind, formatPressure, formatVisibility } = useUnits();
 
 const props = defineProps({
   weather: {
@@ -53,17 +56,11 @@ const windDirection = computed(() => {
   return directions[index];
 });
 
-const feelsLike = computed(() => {
-  return Math.round(props.weather.main.feels_like);
-});
+const feelsLike = computed(() => formatTemp(props.weather.main.feels_like));
 
-const temperature = computed(() => {
-  return Math.round(props.weather.main.temp);
-});
+const temperature = computed(() => formatTemp(props.weather.main.temp));
 
-const windSpeed = computed(() => {
-  return Math.round(props.weather.wind.speed * 3.6);
-});
+const windSpeed = computed(() => formatWind(props.weather.wind.speed));
 
 const backgroundClass = computed(() => {
   const weatherId = props.weather.weather[0].id;
@@ -112,8 +109,8 @@ const backgroundClass = computed(() => {
       
       <div class="weather-main">
         <div class="temp-container">
-          <div class="temp">{{ temperature }}°C</div>
-          <div class="feels-like">Odczuwalna: {{ feelsLike }}°C</div>
+          <div class="temp">{{ temperature }}</div>
+          <div class="feels-like">Odczuwalna: {{ feelsLike }}</div>
         </div>
         
         <div class="weather-icon-desc">
@@ -134,17 +131,17 @@ const backgroundClass = computed(() => {
         
         <div class="detail-item">
           <div class="detail-label">Ciśnienie</div>
-          <div class="detail-value">{{ weather.main.pressure }} hPa</div>
+          <div class="detail-value">{{ formatPressure(weather.main.pressure) }}</div>
         </div>
         
         <div class="detail-item">
           <div class="detail-label">Wiatr</div>
-          <div class="detail-value">{{ windSpeed }} km/h {{ windDirection }}</div>
+          <div class="detail-value">{{ windSpeed }} {{ windDirection }}</div>
         </div>
         
         <div class="detail-item">
           <div class="detail-label">Widoczność</div>
-          <div class="detail-value">{{ Math.round(weather.visibility / 1000) }} km</div>
+          <div class="detail-value">{{ formatVisibility(weather.visibility) }}</div>
         </div>
         
         <div class="detail-item">

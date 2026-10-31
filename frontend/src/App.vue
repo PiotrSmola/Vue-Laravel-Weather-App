@@ -1,10 +1,25 @@
 <script setup>
-import { RouterLink, RouterView } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
-import { ref } from "vue";
+import { ref, computed } from "vue";
+import { visibleNavigation } from "./navigation";
 
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
+
+// Pozycje menu z rejestru src/navigation/*.js
+const navItems = computed(() => visibleNavigation(!!authStore.user));
+
+const route = useRoute();
+const router = useRouter();
+
+// Po wylogowaniu opuszczamy strony wymagające logowania
+const handleLogout = async () => {
+  await authStore.logout();
+  if (route.matched.some((record) => record.meta.requiresAuth)) {
+    router.push({ name: "home" });
+  }
+};
 
 const toggleMobileMenu = () => {
   mobileMenuOpen.value = !mobileMenuOpen.value;
@@ -56,8 +71,13 @@ const closeMobileMenu = () => {
           </div>
           
           <div class="nav-links">
-            <RouterLink :to="{ name: 'home' }" class="nav-link">
-              Strona główna
+            <RouterLink
+              v-for="item in navItems"
+              :key="item.key"
+              :to="item.to"
+              class="nav-link"
+            >
+              {{ item.label }}
             </RouterLink>
             
             <div v-if="authStore.user" class="user-nav">
@@ -65,7 +85,7 @@ const closeMobileMenu = () => {
                 Witaj, {{ authStore.user.name }}
               </span>
               
-              <form @submit.prevent="authStore.logout">
+              <form @submit.prevent="handleLogout">
                 <button class="logout-btn">Wyloguj</button>
               </form>
             </div>
@@ -88,12 +108,14 @@ const closeMobileMenu = () => {
           @click.self="closeMobileMenu"
         >
           <div class="mobile-nav-links">
-            <RouterLink 
-              :to="{ name: 'home' }" 
+            <RouterLink
+              v-for="item in navItems"
+              :key="item.key"
+              :to="item.to"
               class="mobile-nav-link"
               @click="closeMobileMenu"
             >
-              Home
+              {{ item.label }}
             </RouterLink>
             
             <div v-if="authStore.user" class="mobile-user-nav">
@@ -101,7 +123,7 @@ const closeMobileMenu = () => {
                 Hello, {{ authStore.user.name }}
               </span>
               
-              <form @submit.prevent="authStore.logout">
+              <form @submit.prevent="handleLogout">
                 <button class="mobile-logout-btn" @click="closeMobileMenu">
                   Logout
                 </button>

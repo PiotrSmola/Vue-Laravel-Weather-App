@@ -2,6 +2,10 @@
 import { ref, onMounted, computed } from 'vue';
 import { useAuthStore } from "@/stores/auth";
 import { useWeatherStore } from "@/stores/weather";
+import { api } from "@/api/client";
+import { useUnits } from "@/composables/useUnits";
+
+const { formatTemp } = useUnits();
 
 const authStore = useAuthStore();
 const weatherStore = useWeatherStore();
@@ -24,18 +28,7 @@ const loadUserCities = async () => {
   error.value = null;
   
   try {
-    const response = await fetch('/api/cities/user', {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to load user cities');
-    }
-    
-    const data = await response.json();
-    userCities.value = data;
+    userCities.value = await api.get('/cities/user');
   } catch (err) {
     console.error('Load user cities error:', err);
     error.value = 'Failed to load your cities';
@@ -80,7 +73,7 @@ const removeCity = async (cityId) => {
       >
         <div class="city-info">
           <div class="city-name">{{ city.name }}</div>
-          <div class="city-temp" v-if="city.current_temp">{{ Math.round(city.current_temp) }}°C</div>
+          <div class="city-temp" v-if="city.current_temp">{{ formatTemp(city.current_temp) }}</div>
         </div>
         
         <div class="city-actions">

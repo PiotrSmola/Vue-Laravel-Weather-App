@@ -3,6 +3,10 @@ import { ref, computed, watch } from 'vue';
 import { useAuthStore } from "@/stores/auth";
 import { useWeatherStore } from "@/stores/weather";
 import { useRouter } from 'vue-router';
+import { FAVORITES_LIMIT } from '@/config';
+import { useUnits } from '@/composables/useUnits';
+
+const { formatTemp, formatWind, formatPressure, formatVisibility } = useUnits();
 
 const props = defineProps({
   selectedCityId: {
@@ -18,6 +22,8 @@ const selectedCityIndex = ref(0);
 const showConfirmModal = ref(false);
 const showRemoveModal = ref(false);
 const maxFavoritesReached = ref(false);
+// Komunikat o limicie – z odpowiedzi backendu, jeśli dostępny
+const favoritesLimitMessage = ref('');
 const isLoading = ref(false);
 const isRemoving = ref(false);
 
@@ -37,7 +43,7 @@ const isDefaultCity = computed(() => {
 
 // Sprawdzanie limitu ulubionych miast
 const hasReachedFavoritesLimit = computed(() => {
-  return weatherStore.userFavorites.length >= 10;
+  return weatherStore.userFavorites.length >= FAVORITES_LIMIT;
 });
 
 const selectCity = async (index) => {
@@ -88,7 +94,7 @@ watch(() => props.selectedCityId, (newCityId) => {
 
 const temperature = computed(() => {
   if (!weatherStore.currentWeather) return null;
-  return Math.round(weatherStore.currentWeather.main.temp);
+  return formatTemp(weatherStore.currentWeather.main.temp);
 });
 
 const cityName = computed(() => {
@@ -165,6 +171,7 @@ const toggleFavorite = async () => {
     showRemoveModal.value = true;
   } else {
     if (hasReachedFavoritesLimit.value) {
+      favoritesLimitMessage.value = '';
       maxFavoritesReached.value = true;
       return;
     }
@@ -174,9 +181,14 @@ const toggleFavorite = async () => {
 
 const confirmAddToFavorites = async () => {
   try {
-    await weatherStore.addCity(weatherStore.currentWeather.id);
+    const added = await weatherStore.addCity(weatherStore.currentWeather.id);
     await weatherStore.getUserFavorites();
     showConfirmModal.value = false;
+    // Backend odrzucił dodanie z powodu limitu – pokazujemy jego komunikat
+    if (!added && weatherStore.error && /limit/i.test(weatherStore.error)) {
+      favoritesLimitMessage.value = weatherStore.error;
+      maxFavoritesReached.value = true;
+    }
   } catch (err) {
     console.error("Błąd podczas dodawania miasta do ulubionych:", err);
   }
@@ -252,7 +264,7 @@ const closeMaxFavoritesModal = () => {
           </div>
           
           <div class="weather-info">
-            <div class="temperature">{{ temperature }}°C</div>
+            <div class="temperature">{{ temperature }}</div>
             <div class="description">{{ weatherStore.currentWeather.weather[0].description }}</div>
           </div>
           
@@ -263,11 +275,11 @@ const closeMaxFavoritesModal = () => {
             </div>
             <div class="detail">
               <span class="detail-label">Wiatr:</span>
-              <span class="detail-value">{{ Math.round(weatherStore.currentWeather.wind.speed * 3.6) }} km/h</span>
+              <span class="detail-value">{{ formatWind(weatherStore.currentWeather.wind.speed) }}</span>
             </div>
             <div class="detail">
               <span class="detail-label">Ciśnienie:</span>
-              <span class="detail-value">{{ weatherStore.currentWeather.main.pressure }} hPa</span>
+              <span class="detail-value">{{ formatPressure(weatherStore.currentWeather.main.pressure) }}</span>
             </div>
           </div>
         </div>
@@ -283,7 +295,7 @@ const closeMaxFavoritesModal = () => {
           </div>
           <div class="detail">
             <span class="detail-label">Widoczność:</span>
-            <span class="detail-value">{{ Math.round(weatherStore.currentWeather.visibility / 1000) }} km</span>
+            <span class="detail-value">{{ formatVisibility(weatherStore.currentWeather.visibility) }}</span>
           </div>
           <div class="detail">
             <span class="detail-label">Chmury:</span>
@@ -313,7 +325,7 @@ const closeMaxFavoritesModal = () => {
             :alt="day.weather[0].description" 
             class="forecast-icon"
           />
-          <div class="forecast-temp">{{ Math.round(day.main.temp) }}°C</div>
+          <div class="forecast-temp">{{ formatTemp(day.main.temp) }}</div>
           <div class="forecast-desc">{{ day.weather[0].description }}</div>
         </div>
       </div>
@@ -362,7 +374,7 @@ const closeMaxFavoritesModal = () => {
     <div v-if="maxFavoritesReached" class="modal-overlay">
       <div class="confirm-modal">
         <h3 class="modal-title">Limit ulubionych miast</h3>
-        <p class="modal-text">Osiągnięto limit 10 ulubionych miast.</p>
+        <p class="modal-text">{{ favoritesLimitMessage || `Osiągnięto limit ${FAVORITES_LIMIT} ulubionych miast.` }}</p>
         <p class="modal-info">Aby dodać nowe miasto, musisz najpierw usunąć jedno z istniejących ulubionych miast.</p>
         <div class="modal-buttons">
           <button @click="closeMaxFavoritesModal" class="modal-button confirm-button">OK</button>

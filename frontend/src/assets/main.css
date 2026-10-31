@@ -66,3 +66,191 @@
         @apply w-8 h-8 rounded-full overflow-hidden object-center object-cover;
     }
 }
+/*
+ * Współdzielone klasy UI (prefiks ui-) – odwzorowują istniejący wygląd kart, formularzy,
+ * przycisków i modali z LoginView/RegisterView/HomeView/WeatherView. Nowe widoki powinny
+ * używać tych klas zamiast kopiować style. Istniejące komponenty nadal mają własne
+ * (scoped) style – te klasy niczego w nich nie zmieniają.
+ */
+
+/* Karta – jak .login-container / .welcome-section */
+.ui-card {
+    max-width: 800px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+.ui-card--narrow { max-width: 400px; }
+.ui-card--medium { max-width: 600px; }
+
+/* Nagłówki – jak .login-title */
+.ui-title {
+    font-size: 1.75rem;
+    color: #2563eb;
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+.ui-subtitle {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin-bottom: 1rem;
+}
+.ui-muted { color: #6b7280; font-size: 0.875rem; }
+
+/* Formularze – jak .login-form / .form-group */
+.ui-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.ui-form-group {
+    display: flex;
+    flex-direction: column;
+}
+.ui-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: #4b5563;
+}
+.ui-hint {
+    color: #6b7280;
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+}
+input.ui-input,
+select.ui-input,
+textarea.ui-input {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 1rem;
+    color: #0f172a;
+    background-color: white;
+    box-shadow: none;
+    transition: border-color 0.2s;
+}
+input.ui-input:focus,
+select.ui-input:focus,
+textarea.ui-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+}
+.ui-error-message {
+    color: #ef4444;
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+}
+.ui-form-error {
+    background-color: #fee2e2;
+    color: #b91c1c;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+.ui-form-success {
+    background-color: #dcfce7;
+    color: #15803d;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+
+/* Przyciski – jak .login-button oraz przyciski modali */
+.ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.ui-btn:hover:not(:disabled) { background-color: #2563eb; }
+.ui-btn:disabled { background-color: #93c5fd; cursor: not-allowed; }
+.ui-btn--sm { padding: 0.5rem 1rem; }
+.ui-btn--block { width: 100%; }
+.ui-btn--secondary { background-color: #f3f4f6; color: #4b5563; }
+.ui-btn--secondary:hover:not(:disabled) { background-color: #e5e7eb; }
+.ui-btn--secondary:disabled { background-color: #f3f4f6; opacity: 0.7; }
+.ui-btn--danger { background-color: #ef4444; }
+.ui-btn--danger:hover:not(:disabled) { background-color: #dc2626; }
+.ui-btn--danger:disabled { background-color: #fca5a5; }
+.ui-btn-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+.ui-link {
+    color: #3b82f6;
+    font-weight: 500;
+    text-decoration: none;
+}
+.ui-link:hover { text-decoration: underline; }
+
+/* Stany ładowania / błędu / pustej listy – jak .loading-container w HomeView */
+.ui-state {
+    max-width: 800px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background-color: #f3f4f6;
+    border-radius: 8px;
+    text-align: center;
+}
+.ui-state--error { border-left: 4px solid #ef4444; }
+.ui-spinner {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+    border-top-color: #3b82f6;
+    animation: ui-spin 1s ease-in-out infinite;
+    margin-bottom: 1rem;
+}
+@keyframes ui-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Modal – jak .modal-overlay / .confirm-modal w WeatherView */
+.ui-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 50;
+}
+.ui-modal {
+    background-color: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+.ui-modal-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+.ui-modal-text {
+    margin-bottom: 1.5rem;
+    color: #4b5563;
+    text-align: center;
+}

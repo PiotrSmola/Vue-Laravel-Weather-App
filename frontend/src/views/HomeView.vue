@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useWeatherStore } from "@/stores/weather";
 import WeatherView from "@/components/WeatherView.vue";
@@ -16,14 +16,17 @@ onMounted(async () => {
   try {
     isLoading.value = true;
     
-    await authStore.initialize();
+    await authStore.ensureUser();
+    
+    // Ulubione najpierw – potrzebne do ustalenia miasta domowego (ustawienia)
+    if (authStore.isAuthenticated) {
+      await weatherStore.getUserFavorites();
+    }
     
     if (weatherStore.cities.length === 0) {
       await weatherStore.getFeaturedCities();
-    }
-    
-    if (authStore.isAuthenticated) {
-      await weatherStore.getUserFavorites();
+    } else {
+      weatherStore.applyHomeCity();
     }
     
     if (weatherStore.cities.length > 0) {
@@ -43,6 +46,16 @@ onMounted(async () => {
     isLoading.value = false;
   }
 });
+
+// Miasto domowe zmienione (ustawienia, wylogowanie) – przestawiamy listę miast
+watch(
+  () => weatherStore.homeCity?.openweather_id,
+  (newId, oldId) => {
+    if (newId !== oldId && weatherStore.cities.length > 0) {
+      weatherStore.applyHomeCity();
+    }
+  }
+);
 
 const handleCitySelected = async (cityData) => {
   try {

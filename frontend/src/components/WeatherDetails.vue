@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useWeatherStore } from "@/stores/weather";
 import { useAuthStore } from "@/stores/auth";
+import { useUnits } from "@/composables/useUnits";
 
 const props = defineProps({
   cityId: {
@@ -22,6 +23,8 @@ const props = defineProps({
 const router = useRouter();
 const weatherStore = useWeatherStore();
 const authStore = useAuthStore();
+// Wartości z API są metryczne; formatowanie wg ustawień użytkownika
+const { formatTemp, formatWind, formatPressure, formatVisibility, tempUnit, pressureUnit } = useUnits();
 const activeTab = ref('overview');
 const chartType = ref('temperature');
 const isLoadingHistorical = ref(false);
@@ -76,17 +79,17 @@ const windDirection = computed(() => {
 
 const temperature = computed(() => {
   if (!props.currentWeather) return '';
-  return Math.round(props.currentWeather.main.temp);
+  return formatTemp(props.currentWeather.main.temp);
 });
 
 const feelsLike = computed(() => {
   if (!props.currentWeather) return '';
-  return Math.round(props.currentWeather.main.feels_like);
+  return formatTemp(props.currentWeather.main.feels_like);
 });
 
 const windSpeed = computed(() => {
   if (!props.currentWeather) return '';
-  return Math.round(props.currentWeather.wind.speed * 3.6);
+  return formatWind(props.currentWeather.wind.speed);
 });
 
 const cityName = computed(() => {
@@ -141,7 +144,9 @@ const hourlyChartData = computed(() => {
     });
   });
 
-  const tempData = next24Hours.map(item => Math.round(item.main.temp));
+  // Surowe wartości metryczne (°C, hPa) – wysokości słupków liczone jak dotychczas,
+  // etykiety formatowane w szablonie wg jednostek użytkownika
+  const tempData = next24Hours.map(item => item.main.temp);
   const humidityData = next24Hours.map(item => item.main.humidity);
   const pressureData = next24Hours.map(item => item.main.pressure);
 
@@ -150,7 +155,7 @@ const hourlyChartData = computed(() => {
   if (chartType.value === 'temperature') {
     datasets = [
       {
-        label: 'Temperatura (°C)',
+        label: `Temperatura (${tempUnit.value})`,
         data: tempData,
         borderColor: '#ff9800',
         backgroundColor: 'rgba(255, 152, 0, 0.2)',
@@ -172,7 +177,7 @@ const hourlyChartData = computed(() => {
   } else if (chartType.value === 'pressure') {
     datasets = [
       {
-        label: 'Ciśnienie (hPa)',
+        label: `Ciśnienie (${pressureUnit.value})`,
         data: pressureData,
         borderColor: '#4caf50',
         backgroundColor: 'rgba(76, 175, 80, 0.2)',
@@ -183,7 +188,7 @@ const hourlyChartData = computed(() => {
   } else if (chartType.value === 'combined') {
     datasets = [
       {
-        label: 'Temperatura (°C)',
+        label: `Temperatura (${tempUnit.value})`,
         data: tempData,
         borderColor: '#ff9800',
         backgroundColor: 'rgba(255, 152, 0, 0.1)',
@@ -226,13 +231,13 @@ const dailyForecast = computed(() => {
 
   return dailyData.map(day => ({
     date: new Date(day.dt * 1000).toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'short' }),
-    temp: Math.round(day.main.temp),
-    feelsLike: Math.round(day.main.feels_like),
+    temp: formatTemp(day.main.temp),
+    feelsLike: formatTemp(day.main.feels_like),
     description: day.weather[0].description,
     icon: day.weather[0].icon,
     humidity: day.main.humidity,
-    pressure: day.main.pressure,
-    windSpeed: Math.round(day.wind.speed * 3.6),
+    pressure: formatPressure(day.main.pressure),
+    windSpeed: formatWind(day.wind.speed),
     weatherId: day.weather[0].id
   }));
 });
@@ -365,8 +370,8 @@ const formatDateForDaily = (timestamp) => {
 
         <div class="current-conditions">
           <div class="temperature-container">
-            <div class="current-temp">{{ temperature }}°C</div>
-            <div class="feels-like">Odczuwalna: {{ feelsLike }}°C</div>
+            <div class="current-temp">{{ temperature }}</div>
+            <div class="feels-like">Odczuwalna: {{ feelsLike }}</div>
           </div>
           <div class="weather-icon-container">
             <img :src="getWeatherIconUrl(currentWeather.weather[0].icon)" :alt="currentWeather.weather[0].description"
@@ -382,15 +387,15 @@ const formatDateForDaily = (timestamp) => {
           </div>
           <div class="metric">
             <div class="metric-label">Ciśnienie</div>
-            <div class="metric-value">{{ currentWeather.main.pressure }} hPa</div>
+            <div class="metric-value">{{ formatPressure(currentWeather.main.pressure) }}</div>
           </div>
           <div class="metric">
             <div class="metric-label">Wiatr</div>
-            <div class="metric-value">{{ windSpeed }} km/h {{ windDirection }}</div>
+            <div class="metric-value">{{ windSpeed }} {{ windDirection }}</div>
           </div>
           <div class="metric">
             <div class="metric-label">Widoczność</div>
-            <div class="metric-value">{{ Math.round(currentWeather.visibility / 1000) }} km</div>
+            <div class="metric-value">{{ formatVisibility(currentWeather.visibility) }}</div>
           </div>
           <div class="metric">
             <div class="metric-label">Wschód słońca</div>
@@ -428,10 +433,10 @@ const formatDateForDaily = (timestamp) => {
             <h2>Warunki obecne</h2>
             <p class="overview-description" v-if="currentWeather">
               Obecnie w {{ cityName }} jest {{ currentWeather.weather[0].description }} z temperaturą {{
-              temperature }}°C.
-              Temperatura odczuwalna to {{ feelsLike }}°C, a wilgotność powietrza wynosi {{
+              temperature }}.
+              Temperatura odczuwalna to {{ feelsLike }}, a wilgotność powietrza wynosi {{
               currentWeather.main.humidity }}%.
-              Wiatr wieje z prędkością {{ windSpeed }} km/h z kierunku {{ windDirection }}.
+              Wiatr wieje z prędkością {{ windSpeed }} z kierunku {{ windDirection }}.
             </p>
 
             <div v-if="currentWeather && currentWeather.rain" class="additional-info">
@@ -485,7 +490,7 @@ const formatDateForDaily = (timestamp) => {
                 </div>
                 <img :src="getWeatherIconUrl(item.weather[0].icon)" :alt="item.weather[0].description"
                   class="forecast-icon" />
-                <div class="forecast-temp">{{ Math.round(item.main.temp) }}°C</div>
+                <div class="forecast-temp">{{ formatTemp(item.main.temp) }}</div>
               </div>
             </div>
           </div>
@@ -503,12 +508,12 @@ const formatDateForDaily = (timestamp) => {
               </div>
               <img :src="getWeatherIconUrl(item.weather[0].icon)" :alt="item.weather[0].description"
                 class="hourly-icon" />
-              <div class="hourly-temp">{{ Math.round(item.main.temp) }}°C</div>
+              <div class="hourly-temp">{{ formatTemp(item.main.temp) }}</div>
               <div class="hourly-description">{{ item.weather[0].description }}</div>
               <div class="hourly-details">
                 <div class="hourly-detail">
                   <span class="detail-label">Wiatr:</span>
-                  <span class="detail-value">{{ Math.round(item.wind.speed * 3.6) }} km/h</span>
+                  <span class="detail-value">{{ formatWind(item.wind.speed) }}</span>
                 </div>
                 <div class="hourly-detail">
                   <span class="detail-label">Wilgotność:</span>
@@ -534,13 +539,13 @@ const formatDateForDaily = (timestamp) => {
                 <div class="daily-description">{{ day.description }}</div>
               </div>
               <div class="daily-temps">
-                <div class="daily-high">{{ day.temp }}°C</div>
-                <div class="daily-feels-like">Odczuwalna: {{ day.feelsLike }}°C</div>
+                <div class="daily-high">{{ day.temp }}</div>
+                <div class="daily-feels-like">Odczuwalna: {{ day.feelsLike }}</div>
               </div>
               <div class="daily-details">
                 <div class="daily-detail">
                   <span class="detail-label">Wiatr:</span>
-                  <span class="detail-value">{{ day.windSpeed }} km/h</span>
+                  <span class="detail-value">{{ day.windSpeed }}</span>
                 </div>
                 <div class="daily-detail">
                   <span class="detail-label">Wilgotność:</span>
@@ -548,7 +553,7 @@ const formatDateForDaily = (timestamp) => {
                 </div>
                 <div class="daily-detail">
                   <span class="detail-label">Ciśnienie:</span>
-                  <span class="detail-value">{{ day.pressure }} hPa</span>
+                  <span class="detail-value">{{ day.pressure }}</span>
                 </div>
               </div>
             </div>
@@ -593,10 +598,10 @@ const formatDateForDaily = (timestamp) => {
                     <div class="chart-values temperature-values">
                       <div v-for="(value, index) in hourlyChartData.datasets[0].data" :key="index"
                         class="chart-bar temperature-bar" :style="{
-                          height: `${value * 4}px`,
+                          height: `${Math.round(value) * 4}px`,
                           backgroundColor: hourlyChartData.datasets[0].borderColor
                         }">
-                        <span class="chart-value">{{ value }}°C</span>
+                        <span class="chart-value">{{ formatTemp(value) }}</span>
                       </div>
                     </div>
 
@@ -625,13 +630,13 @@ const formatDateForDaily = (timestamp) => {
                   <div class="chart-values">
                     <div v-for="(value, index) in hourlyChartData.datasets[0].data" :key="index" class="chart-bar"
                       :style="{
-                        height: chartType === 'temperature' ? `${value * 5}px` :
+                        height: chartType === 'temperature' ? `${Math.round(value) * 5}px` :
                           chartType === 'humidity' ? `${value * 2}px` : `${(value - 990) * 2}px`,
                         backgroundColor: hourlyChartData.datasets[0].borderColor
                       }">
-                      <span class="chart-value">{{ value }}{{
-                        chartType === 'temperature' ? '°C' :
-                          chartType === 'humidity' ? '%' : ' hPa'
+                      <span class="chart-value">{{
+                        chartType === 'temperature' ? formatTemp(value) :
+                          chartType === 'humidity' ? `${value}%` : formatPressure(value)
                       }}</span>
                     </div>
                   </div>
@@ -652,7 +657,7 @@ const formatDateForDaily = (timestamp) => {
                 </div>
               </div>
               <div class="wind-speed">
-                {{ windSpeed }} km/h
+                {{ windSpeed }}
               </div>
             </div>
           </div>
@@ -703,14 +708,14 @@ const formatDateForDaily = (timestamp) => {
               
               <div class="historical-chart">
                 <div class="chart-legend-labels">
-                  <div class="legend-label" style="color: #ff9800;">● Temperatura (°C)</div>
+                  <div class="legend-label" style="color: #ff9800;">● Temperatura ({{ tempUnit }})</div>
                   <div class="legend-label" style="color: #2196f3;">● Wilgotność (%)</div>
                 </div>
                 
                 <div class="chart-area">
                   <div class="y-axis temp-axis">
                     <div v-for="i in 5" :key="`temp-${i}`" class="axis-tick">
-                      {{ Math.round(generateHistoricalChartData.tempMin + (generateHistoricalChartData.tempMax - generateHistoricalChartData.tempMin) * (5-i) / 4) }}°C
+                      {{ formatTemp(generateHistoricalChartData.tempMin + (generateHistoricalChartData.tempMax - generateHistoricalChartData.tempMin) * (5-i) / 4) }}
                     </div>
                   </div>
                   
@@ -793,19 +798,19 @@ const formatDateForDaily = (timestamp) => {
                   <div class="stat-item">
                     <div class="stat-label">Minimalna temperatura</div>
                     <div class="stat-value temp-value">
-                      {{ Math.min(...historicalData.data.map(d => d.temperature)).toFixed(1) }}°C
+                      {{ formatTemp(Math.min(...historicalData.data.map(d => d.temperature)), { decimals: 1 }) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Maksymalna temperatura</div>
                     <div class="stat-value temp-value">
-                      {{ Math.max(...historicalData.data.map(d => d.temperature)).toFixed(1) }}°C
+                      {{ formatTemp(Math.max(...historicalData.data.map(d => d.temperature)), { decimals: 1 }) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Średnia temperatura</div>
                     <div class="stat-value temp-value">
-                      {{ (historicalData.data.reduce((sum, d) => sum + d.temperature, 0) / historicalData.data.length).toFixed(1) }}°C
+                      {{ formatTemp(historicalData.data.reduce((sum, d) => sum + d.temperature, 0) / historicalData.data.length, { decimals: 1 }) }}
                     </div>
                   </div>
                   <div class="stat-item">

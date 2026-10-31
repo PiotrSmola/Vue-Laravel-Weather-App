@@ -3,6 +3,10 @@ import { ref, onMounted, computed, watch } from 'vue';
 import { useAuthStore } from "@/stores/auth";
 import { useWeatherStore } from "@/stores/weather";
 import { useRouter } from 'vue-router';
+import { FAVORITES_LIMIT } from '@/config';
+import { useUnits } from '@/composables/useUnits';
+
+const { formatTemp } = useUnits();
 
 const props = defineProps({
   onCitySelect: {
@@ -32,7 +36,7 @@ const hasFavorites = computed(() => {
 });
 
 const hasReachedFavoritesLimit = computed(() => {
-  return weatherStore.userFavorites.length >= 10;
+  return weatherStore.userFavorites.length >= FAVORITES_LIMIT;
 });
 
 const showLimitWarning = ref(false);
@@ -125,7 +129,7 @@ onMounted(() => {
       
       <div v-else-if="hasFavorites" class="favorites-section">
         <div class="favorites-header">
-          <h3 class="favorites-title">Twoje ulubione miasta ({{ weatherStore.userFavorites.length }}/10)</h3>
+          <h3 class="favorites-title">Twoje ulubione miasta ({{ weatherStore.userFavorites.length }}/{{ FAVORITES_LIMIT }})</h3>
           <div v-if="hasReachedFavoritesLimit" class="limit-badge">Limit osiągnięty</div>
         </div>
         
@@ -140,7 +144,7 @@ onMounted(() => {
               <span class="favorite-city-name">{{ city.name }}</span>
               <span class="favorite-city-country">{{ city.country }}</span>
               <div class="favorite-city-weather" v-if="city.current_temp">
-                <span class="temp">{{ Math.round(city.current_temp) }}°C</span>
+                <span class="temp">{{ formatTemp(city.current_temp) }}</span>
                 <span class="condition" v-if="city.current_condition">{{ city.current_condition }}</span>
                 <img 
                   v-if="city.current_icon" 
@@ -172,7 +176,7 @@ onMounted(() => {
       </div>
       
       <div v-if="showLimitWarning" class="limit-warning">
-        <p>Osiągnięto limit 10 ulubionych miast. Usuń jedno z istniejących miast, aby dodać nowe.</p>
+        <p>Osiągnięto limit {{ FAVORITES_LIMIT }} ulubionych miast. Usuń jedno z istniejących miast, aby dodać nowe.</p>
         <button @click="closeLimitWarning" class="close-button">×</button>
       </div>
     </div>
