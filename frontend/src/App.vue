@@ -3,6 +3,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
 import { ref, computed } from "vue";
 import { visibleNavigation } from "./navigation";
+import EmailVerificationBanner from "./components/EmailVerificationBanner.vue";
 
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
@@ -81,9 +82,9 @@ const closeMobileMenu = () => {
             </RouterLink>
             
             <div v-if="authStore.user" class="user-nav">
-              <span class="user-greeting">
+              <RouterLink :to="{ name: 'account' }" class="user-greeting">
                 Witaj, {{ authStore.user.name }}
-              </span>
+              </RouterLink>
               
               <form @submit.prevent="handleLogout">
                 <button class="logout-btn">Wyloguj</button>
@@ -151,6 +152,8 @@ const closeMobileMenu = () => {
         </div>
       </nav>
     </header>
+
+    <EmailVerificationBanner />
 
     <RouterView />
     
@@ -224,7 +227,7 @@ const closeMobileMenu = () => {
 }
 
 .user-greeting {
-  @apply text-white opacity-80;
+  @apply text-white opacity-80 hover:opacity-100;
 }
 
 .logout-btn {

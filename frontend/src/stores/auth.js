@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { api } from "@/api/client";
 import { TOKEN_STORAGE_KEY } from "@/config";
 import { useSettingsStore } from "./settings";
+import { deviceName } from "@/utils/device";
 
 function readToken() {
   try {
@@ -66,7 +67,11 @@ export const useAuthStore = defineStore("authStore", {
       this.error = null;
 
       try {
-        const data = await api.post("/login", { email, password }, { auth: false });
+        const data = await api.post(
+          "/login",
+          { email, password, device_name: deviceName() },
+          { auth: false }
+        );
         await this.setSession(data.token, data.user);
         return true;
       } catch (error) {
@@ -85,7 +90,7 @@ export const useAuthStore = defineStore("authStore", {
       try {
         const data = await api.post(
           "/register",
-          { name, email, password, password_confirmation },
+          { name, email, password, password_confirmation, device_name: deviceName() },
           { auth: false }
         );
         await this.setSession(data.token, data.user);
@@ -167,6 +172,13 @@ export const useAuthStore = defineStore("authStore", {
       })();
 
       return userPromise;
+    },
+
+    // Aktualizuje wybrane pola zalogowanego użytkownika (np. po edycji profilu
+    // lub weryfikacji e-maila) bez ponownego wczytywania ustawień
+    patchUser(fields) {
+      if (!this.user) return;
+      this.user = { ...this.user, ...fields };
     },
   },
 });

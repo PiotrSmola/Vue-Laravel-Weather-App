@@ -69,6 +69,9 @@ const login = async () => {
           <p v-if="authStore.error && authStore.error.includes('hasło')" class="error-message">
             {{ authStore.error }}
           </p>
+          <router-link :to="{ name: 'forgot-password' }" class="forgot-link">
+            Nie pamiętasz hasła?
+          </router-link>
         </div>
 
         <div v-if="formError" class="form-error">
@@ -186,6 +189,18 @@ input:focus {
   color: #3b82f6;
   font-weight: 500;
   text-decoration: none;
+}
+
+.forgot-link {
+  align-self: flex-end;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
 }
 
 .register-link a:hover {
