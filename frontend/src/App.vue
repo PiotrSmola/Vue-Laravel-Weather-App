@@ -12,6 +12,7 @@ const mobileMenuOpen = ref(false);
 
 // Pozycje menu z rejestru src/navigation/*.js
 const navItems = computed(() => visibleNavigation(!!authStore.user));
+const desktopNavItems = computed(() => navItems.value.filter((item) => item.desktop !== false));
 
 const route = useRoute();
 const router = useRouter();
@@ -77,7 +78,7 @@ const closeMobileMenu = () => {
           
           <div class="nav-links">
             <RouterLink
-              v-for="item in navItems"
+              v-for="item in desktopNavItems"
               :key="item.key"
               :to="item.to"
               class="nav-link"
@@ -189,15 +190,15 @@ const closeMobileMenu = () => {
 }
 
 .main-nav {
-  @apply relative;
+  @apply relative 2xl:max-w-none;
 }
 
 .nav-container {
-  @apply container mx-auto px-2 py-2 flex items-center justify-between;
+  @apply container mx-auto px-2 py-2 flex items-center justify-between gap-8;
 }
 
 .logo-container {
-  @apply flex items-center justify-between w-full md:w-auto;
+  @apply flex items-center justify-between w-full 2xl:w-auto;
 }
 
 .logo {
@@ -209,11 +210,11 @@ const closeMobileMenu = () => {
 }
 
 .logo-text {
-  @apply text-2xl font-bold ;
+  @apply text-2xl font-bold whitespace-nowrap;
 }
 
 .mobile-menu-btn {
-  @apply md:hidden text-white p-2;
+  @apply 2xl:hidden text-white p-2;
 }
 
 .icon {
@@ -221,11 +222,11 @@ const closeMobileMenu = () => {
 }
 
 .nav-links {
-  @apply hidden md:flex items-center space-x-8;
+  @apply hidden 2xl:flex items-center space-x-2;
 }
 
 .nav-link {
-  @apply text-white opacity-80 hover:opacity-100 text-lg py-2;
+  @apply text-white opacity-80 hover:opacity-100 text-lg py-2 whitespace-nowrap;
 }
 
 .user-nav {
@@ -233,7 +234,7 @@ const closeMobileMenu = () => {
 }
 
 .user-greeting {
-  @apply text-white opacity-80 hover:opacity-100;
+  @apply text-white opacity-80 hover:opacity-100 whitespace-nowrap truncate max-w-[10rem];
 }
 
 .logout-btn {
@@ -253,7 +254,7 @@ const closeMobileMenu = () => {
 }
 
 .mobile-nav {
-  @apply fixed inset-0 bg-blue-900 bg-opacity-95 z-50 flex items-center justify-center md:hidden;
+  @apply fixed inset-0 bg-blue-900 bg-opacity-95 z-50 flex items-center justify-center 2xl:hidden;
 }
 
 .mobile-nav-links {

@@ -4,6 +4,7 @@
 //   - requiresAuth – widoczne tylko dla zalogowanych
 //   - guestOnly    – widoczne tylko dla gości
 //   - order        – kolejność (rosnąco, domyślnie 50)
+//   - desktop      – false: pozycja tylko w menu mobilnym (np. gdy na desktopie dubluje inny link)
 
 const files = import.meta.glob("./*.js", { eager: true });
 

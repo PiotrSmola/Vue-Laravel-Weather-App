@@ -99,7 +99,7 @@ let timer = null;
   margin-right: 0.25rem;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1536px) {
   .alerts-bell--mobile {
     display: none;
   }
