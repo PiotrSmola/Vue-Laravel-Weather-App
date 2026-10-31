@@ -3,6 +3,7 @@ import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWeatherStore } from "@/stores/weather";
 import WeatherDetails from '@/components/WeatherDetails.vue';
+import AirQualityPanel from '@/components/air/AirQualityPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -70,6 +71,7 @@ const handleBack = () => {
         :currentWeather="weatherStore.currentWeather"
         :forecast="weatherStore.forecast"
       />
+      <AirQualityPanel :cityId="weatherStore.currentWeather.id" />
     </div>
     
     <div v-else class="empty-container">

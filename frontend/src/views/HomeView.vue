@@ -5,6 +5,7 @@ import { useWeatherStore } from "@/stores/weather";
 import WeatherView from "@/components/WeatherView.vue";
 import CitySearch from "@/components/CitySearch.vue";
 import UserFavorites from "@/components/UserFavorites.vue";
+import AirQualityBadge from "@/components/air/AirQualityBadge.vue";
 
 const authStore = useAuthStore();
 const weatherStore = useWeatherStore();
@@ -136,6 +137,7 @@ const retryLoading = async () => {
     
     <div v-else-if="weatherStore.currentWeather" class="weather-container">
       <WeatherView :selectedCityId="selectedCityData" />
+      <AirQualityBadge :cityId="weatherStore.currentWeather.id" />
     </div>
     
     <div v-else class="empty-container">

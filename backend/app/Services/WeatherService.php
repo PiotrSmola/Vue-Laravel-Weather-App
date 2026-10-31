@@ -9,6 +9,7 @@ use App\Models\WeatherData;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -67,6 +68,24 @@ class WeatherService
                 return null;
             }
         })->filter()->values();
+    }
+
+    /**
+     * ID OpenWeather miast aktualizowanych cyklicznie (weather:update, air:update):
+     * suma wszystkich miast w ulubionych i miast domyślnych z config/weather.php.
+     *
+     * @return Collection<int, int>
+     */
+    public function openweatherIdsToUpdate(): Collection
+    {
+        $favoriteIds = City::whereIn('id', DB::table('user_cities')->select('city_id'))
+            ->pluck('openweather_id')
+            ->map(fn ($id) => (int) $id);
+
+        return $favoriteIds
+            ->merge(array_map('intval', config('weather.default_cities', [])))
+            ->unique()
+            ->values();
     }
 
     // Tworzy (lub zwraca istniejące) miasto na podstawie odpowiedzi /data/2.5/weather
