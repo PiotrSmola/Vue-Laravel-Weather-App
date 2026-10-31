@@ -33,7 +33,7 @@ const register = async () => {
     if (success) {
       // Powrót na stronę, która wymagała zalogowania (?redirect=)
       router.push(safeRedirect(route.query.redirect));
-    } else if (authStore.error && !/email|hasło|name/.test(authStore.error)) {
+    } else if (authStore.error && Object.keys(authStore.fieldErrors).length === 0) {
       // Komunikaty dotyczące pól są wyświetlane przy polach formularza
       formError.value = authStore.error;
     }
@@ -60,8 +60,8 @@ const register = async () => {
             placeholder="Twoje imię" 
             required
           />
-          <p v-if="authStore.error && authStore.error.includes('name')" class="error-message">
-            {{ authStore.error }}
+          <p v-if="authStore.fieldErrors.name" class="error-message">
+            {{ authStore.fieldErrors.name[0] }}
           </p>
         </div>
 
@@ -74,8 +74,8 @@ const register = async () => {
             placeholder="Twój email" 
             required
           />
-          <p v-if="authStore.error && authStore.error.includes('email')" class="error-message">
-            {{ authStore.error }}
+          <p v-if="authStore.fieldErrors.email" class="error-message">
+            {{ authStore.fieldErrors.email[0] }}
           </p>
         </div>
 
@@ -88,8 +88,8 @@ const register = async () => {
             placeholder="Twoje hasło" 
             required
           />
-          <p v-if="authStore.error && authStore.error.includes('hasło')" class="error-message">
-            {{ authStore.error }}
+          <p v-if="authStore.fieldErrors.password" class="error-message">
+            {{ authStore.fieldErrors.password[0] }}
           </p>
         </div>
 

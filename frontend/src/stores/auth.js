@@ -24,6 +24,8 @@ export const useAuthStore = defineStore("authStore", {
       userLoaded: false,
       loading: false,
       error: null,
+      // Błędy walidacji z backendu przypisane do pól formularza ({ pole: [komunikaty] })
+      fieldErrors: {},
     };
   },
   getters: {
@@ -86,6 +88,7 @@ export const useAuthStore = defineStore("authStore", {
     async register(name, email, password, password_confirmation) {
       this.loading = true;
       this.error = null;
+      this.fieldErrors = {};
 
       try {
         const data = await api.post(
@@ -97,6 +100,7 @@ export const useAuthStore = defineStore("authStore", {
         return true;
       } catch (error) {
         console.error("Register error:", error);
+        this.fieldErrors = error.errors || {};
         this.error = error.errors
           ? error.messages.join("\n")
           : error.message || "Nie udało się zarejestrować";

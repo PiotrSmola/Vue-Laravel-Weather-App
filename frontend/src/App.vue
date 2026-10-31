@@ -120,9 +120,9 @@ const closeMobileMenu = () => {
             </RouterLink>
             
             <div v-if="authStore.user" class="mobile-user-nav">
-              <span class="mobile-user-greeting">
-                Hello, {{ authStore.user.name }}
-              </span>
+              <RouterLink :to="{ name: 'account' }" class="mobile-user-greeting" @click="closeMobileMenu">
+                Witaj, {{ authStore.user.name }}
+              </RouterLink>
               
               <form @submit.prevent="handleLogout">
                 <button class="mobile-logout-btn" @click="closeMobileMenu">
