@@ -59,7 +59,55 @@ A modern weather tracking application for monitoring weather conditions in vario
 ### External
 - OpenWeatherMap API key (free available)
 
-## 🚀 Installation
+## 🐳 Quick Start with Docker (recommended)
+
+The only requirement is [Docker](https://docs.docker.com/get-docker/) with Docker Compose v2 (Docker Desktop on Windows/macOS). PHP, Composer, Node.js and MySQL run inside containers.
+
+```bash
+git clone https://github.com/PiotrSmola/Vue-Laravel-Weather-App.git
+cd Vue-Laravel-Weather-App
+```
+
+Windows (PowerShell):
+```powershell
+.\setup.ps1
+# if scripts are blocked: powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+Linux / macOS / Git Bash:
+```bash
+./setup.sh
+```
+
+The script:
+1. checks that Docker is installed and running,
+2. creates `.env` (Compose settings) and `backend/.env`, picking free ports if the defaults are taken,
+3. asks for your OpenWeatherMap API key (you can also pass it: `-ApiKey KEY` / `--api-key KEY`),
+4. builds and starts the containers; on start the backend runs `composer install`, generates `APP_KEY` and runs migrations,
+5. fetches initial weather data for the default cities (skip with `-NoFetch` / `--no-fetch`).
+
+After setup the app is available at:
+
+| Service  | Address                     |
+|----------|-----------------------------|
+| Frontend | http://localhost:5173       |
+| API      | http://localhost:8000/api   |
+| MySQL    | `localhost:3307` (user `weather`, password `weather`) |
+
+If a port was taken, the script prints the one it used instead (stored in `.env`).
+
+Containers: `db` (MySQL 8), `backend` (Laravel on PHP 8.3), `scheduler` (`php artisan schedule:work`, updates weather every 30 minutes) and `frontend` (Vite dev server with hot reload). The source code is mounted into the containers, so changes are visible immediately.
+
+Useful commands:
+```bash
+docker compose logs -f                              # logs
+docker compose stop                                 # stop
+docker compose up -d                                # start again
+docker compose exec backend php artisan migrate     # artisan commands
+docker compose down -v                              # remove containers and the database
+```
+
+## 🚀 Manual Installation
 
 ### 1. Clone the repository
 ```bash

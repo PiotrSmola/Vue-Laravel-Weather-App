@@ -12,9 +12,13 @@ export default defineConfig({
     },
   },
   server: {
+    watch: {
+      // W Dockerze na Windowsie/macOS zdarzenia plików z bind mounta nie docierają
+      usePolling: process.env.VITE_USE_POLLING === "true",
+    },
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: process.env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8000",
         changeOrigin: true,
         headers: {
           Accept: "application/json",
