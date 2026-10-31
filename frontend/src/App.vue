@@ -43,7 +43,7 @@ const closeMobileMenu = () => {
               <span class="logo-text">Poland&World Weather</span>
             </RouterLink>
 
-            <AlertsBell class="ml-auto mr-1 md:hidden" />
+            <AlertsBell mobile />
             
             <button 
               class="mobile-menu-btn" 

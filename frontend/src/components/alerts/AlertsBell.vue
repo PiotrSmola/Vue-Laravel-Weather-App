@@ -8,6 +8,9 @@ import { useAlertsStore } from "@/stores/alerts";
 
 const REFRESH_MS = 2 * 60 * 1000;
 
+// mobile – wariant obok przycisku menu (widoczny tylko na małych ekranach)
+defineProps({ mobile: { type: Boolean, default: false } });
+
 const authStore = useAuthStore();
 const alertsStore = useAlertsStore();
 
@@ -60,6 +63,7 @@ let timer = null;
     v-if="authStore.user"
     :to="{ name: 'alerts', hash: '#powiadomienia' }"
     class="alerts-bell"
+    :class="{ 'alerts-bell--mobile': mobile }"
     :title="alertsStore.unreadCount ? `Nieprzeczytane alerty: ${alertsStore.unreadCount}` : 'Alerty pogodowe'"
     :aria-label="alertsStore.unreadCount ? `Nieprzeczytane alerty: ${alertsStore.unreadCount}` : 'Alerty pogodowe'"
   >
@@ -88,6 +92,17 @@ let timer = null;
 .alerts-bell:hover {
   opacity: 1;
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+.alerts-bell--mobile {
+  margin-left: auto;
+  margin-right: 0.25rem;
+}
+
+@media (min-width: 768px) {
+  .alerts-bell--mobile {
+    display: none;
+  }
 }
 
 .alerts-bell-icon {

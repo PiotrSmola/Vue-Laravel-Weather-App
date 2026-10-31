@@ -165,7 +165,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main>
+  <main class="alerts-main">
     <div class="ui-card alerts-page">
       <h1 class="ui-title">Alerty pogodowe</h1>
 
@@ -317,10 +317,21 @@ onMounted(async () => {
   margin-bottom: 0;
 }
 
+/* Na telefonie karta na całą szerokość (globalny styl main ma szerokość 80%) */
 @media (max-width: 640px) {
+  .alerts-main {
+    width: 100%;
+    padding: 0 0.75rem;
+  }
+
   .alerts-page {
-    margin: 1rem;
-    padding: 1.25rem;
+    margin: 1rem 0;
+    padding: 1.25rem 1rem;
+  }
+
+  .rule-item {
+    gap: 0.5rem;
+    padding: 0.6rem 0.5rem;
   }
 }
 
