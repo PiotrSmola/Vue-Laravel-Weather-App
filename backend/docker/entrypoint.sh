@@ -29,6 +29,12 @@ fi
 php artisan config:clear >/dev/null
 php artisan migrate --force
 
+# Klucze VAPID dla powiadomień Web Push (tylko gdy ich brakuje)
+if ! grep -q '^VAPID_PUBLIC_KEY=.' .env || ! grep -q '^VAPID_PRIVATE_KEY=.' .env; then
+    echo "Generowanie kluczy VAPID (Web Push)..."
+    php artisan webpush:vapid || echo "Nie udało się wygenerować kluczy VAPID"
+fi
+
 # Nie używamy `artisan serve` - przekazuje on serwerowi tylko wybrane zmienne
 # środowiskowe, więc DB_HOST itp. z docker-compose by nie dotarły
 export PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}"

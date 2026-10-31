@@ -20,3 +20,9 @@ Schedule::command('weather:update')
     ->everyThirtyMinutes()
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/weather-update.log'));
+
+// Alerty prognozy (deszcz jutro, przymrozek) dla miast z aktywnymi regułami co 3 godziny
+Schedule::command('alerts:forecast')
+    ->everyThreeHours()
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/alerts-forecast.log'));
