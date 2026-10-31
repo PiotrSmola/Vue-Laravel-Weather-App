@@ -252,4 +252,20 @@ DELETE /api/user/cities/{cityId}  # Remove from favorites
 GET /api/cities/{cityId}/historical # Historical data
 ```
 
+### History and city comparison
+```
+GET /api/cities/{cityId}/history/daily?from&to&tz    # Daily aggregates (auth, favorites only)
+GET /api/cities/{cityId}/history/summary?from&to&tz  # Records, averages, vs yesterday / week ago
+GET /api/cities/{cityId}/history/export?from&to&tz&format=csv  # CSV download (UTF-8 BOM, ";")
+GET /api/compare?ids=756135,3094802&lang=pl          # Current weather + forecast for 2-4 cities (public)
+```
+
+Demo history data (artificial, for previewing charts without waiting weeks for real measurements):
+```bash
+# 60 days of hourly data for Rzeszów, added to the favorites of the given user
+php artisan weather:demo-history 759734 --days=60 --user=you@example.com
+# Docker: docker compose exec backend php artisan weather:demo-history 3094802 --days=90 --interval=30
+```
+Existing measurements are never overwritten. The seeder `HistoryDemoSeeder` does the same for Rzeszów (60 days).
+
 **Weather data provided by [OpenWeatherMap](https://openweathermap.org)**

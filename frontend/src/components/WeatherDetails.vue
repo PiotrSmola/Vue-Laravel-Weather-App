@@ -4,6 +4,16 @@ import { useRouter } from 'vue-router';
 import { useWeatherStore } from "@/stores/weather";
 import { useAuthStore } from "@/stores/auth";
 import { useUnits } from "@/composables/useUnits";
+import {
+  HISTORY_PRESETS,
+  historyRange,
+  rangeDays,
+  toDateInput,
+  fetchHistorical,
+  fetchHistoryDaily,
+  fetchHistorySummary,
+  exportHistoryCsv,
+} from "@/api/history";
 
 const props = defineProps({
   cityId: {
@@ -24,12 +34,27 @@ const router = useRouter();
 const weatherStore = useWeatherStore();
 const authStore = useAuthStore();
 // Wartości z API są metryczne; formatowanie wg ustawień użytkownika
-const { formatTemp, formatWind, formatPressure, formatVisibility, tempUnit, pressureUnit } = useUnits();
+const {
+  formatTemp, formatWind, formatPressure, formatVisibility, tempUnit, pressureUnit, windUnit,
+  units, convertWind, convertPressure,
+} = useUnits();
 const activeTab = ref('overview');
 const chartType = ref('temperature');
 const isLoadingHistorical = ref(false);
 const historicalData = ref(null);
 const historicalError = ref(null);
+
+// Zakres historii: preset (24h / 7 / 30 / 90 dni) lub własne daty
+const historyPreset = ref('7d');
+const customFrom = ref(toDateInput(Date.now() - 7 * 24 * 3600 * 1000));
+const customTo = ref(toDateInput(Date.now()));
+const todayInput = toDateInput(Date.now());
+const appliedRange = ref(null);
+// Agregaty dzienne (zakresy > 7 dni) oraz rekordy i porównania
+const dailyHistory = ref(null);
+const historySummary = ref(null);
+const isExporting = ref(false);
+const exportError = ref(null);
 
 const getWeatherIconUrl = (iconCode) => {
   return `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
@@ -253,12 +278,15 @@ const generateHistoricalChartData = computed(() => {
   const humidityValues = data.map(d => d.humidity);
   
   const tempMin = Math.floor(Math.min(...tempValues));
-  const tempMax = Math.ceil(Math.max(...tempValues));
+  let tempMax = Math.ceil(Math.max(...tempValues));
   const humidityMin = Math.floor(Math.min(...humidityValues));
-  const humidityMax = Math.ceil(Math.max(...humidityValues));
-  
+  let humidityMax = Math.ceil(Math.max(...humidityValues));
+  // Stałe wartości (np. jeden pomiar) – unikamy dzielenia przez zero
+  if (tempMax === tempMin) tempMax = tempMin + 1;
+  if (humidityMax === humidityMin) humidityMax = humidityMin + 1;
+
   const points = data.map((item, index) => {
-    const x = (index / (data.length - 1)) * 100;
+    const x = data.length > 1 ? (index / (data.length - 1)) * 100 : 50;
     
     // Normalizacja wartości do wysokości wykresu (200px)
     const tempHeight = 200 - ((item.temperature - tempMin) / (tempMax - tempMin)) * 200;
@@ -288,11 +316,248 @@ const generateHistoricalChartData = computed(() => {
   };
 });
 
-const hasHistoricalData = computed(() => {
-  return historicalData.value && 
-    historicalData.value.data && 
-    historicalData.value.data.length > 0;
+const hasRawHistory = computed(() => {
+  return !!(historicalData.value &&
+    historicalData.value.data &&
+    historicalData.value.data.length > 0);
 });
+
+const hasDailyHistory = computed(() => !!(dailyHistory.value?.days?.length));
+
+// Zakresy dłuższe niż 7 dni pokazujemy jako agregaty dzienne (pasmo min–maks)
+const isDailyView = computed(() => rangeDays(appliedRange.value) > 7.01);
+
+const hasHistoricalData = computed(() => isDailyView.value ? hasDailyHistory.value : hasRawHistory.value);
+
+const formatMoment = (timestamp) => new Date(timestamp).toLocaleDateString('pl-PL', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+});
+
+const formatShortMoment = (timestamp) => new Date(timestamp).toLocaleDateString('pl-PL', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit'
+});
+
+// Etykiety osi X wykresu pomiarów: przy zakresie do 2 dni z godziną
+const rawAxisLabel = (timestamp) => {
+  const data = historicalData.value?.data || [];
+  const span = data.length > 1 ? data[data.length - 1].timestamp - data[0].timestamp : 0;
+  return span <= 2 * 24 * 3600 * 1000
+    ? formatShortMoment(timestamp)
+    : new Date(timestamp).toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' });
+};
+
+// "2026-10-30" -> data lokalna (bez przesunięcia strefy)
+const dayToDate = (day) => new Date(`${day}T12:00:00`);
+
+const formatDay = (day, options = { day: 'numeric', month: 'short' }) =>
+  dayToDate(day).toLocaleDateString('pl-PL', options);
+
+// Liczba pomiarów i ich zakres czasowy (dla trybu surowego i dziennego)
+const historyInfo = computed(() => {
+  if (!isDailyView.value && hasRawHistory.value) {
+    const data = historicalData.value.data;
+    return { count: data.length, from: data[0].timestamp, to: data[data.length - 1].timestamp };
+  }
+  if (isDailyView.value && hasDailyHistory.value) {
+    const days = dailyHistory.value.days;
+    const summary = historySummary.value;
+    return {
+      count: days.reduce((sum, d) => sum + d.count, 0),
+      from: summary?.first?.timestamp ?? dayToDate(days[0].date).getTime(),
+      to: summary?.last?.timestamp ?? dayToDate(days[days.length - 1].date).getTime(),
+    };
+  }
+  return null;
+});
+
+// Statystyki: z pomiarów (tryb surowy) albo z podsumowania / agregatów dziennych
+const historyStats = computed(() => {
+  if (!isDailyView.value && hasRawHistory.value) {
+    const data = historicalData.value.data;
+    const temps = data.map(d => d.temperature);
+    const hums = data.map(d => d.humidity);
+    return {
+      tempMin: Math.min(...temps),
+      tempMax: Math.max(...temps),
+      tempAvg: temps.reduce((s, v) => s + v, 0) / temps.length,
+      humMin: Math.min(...hums),
+      humMax: Math.max(...hums),
+      humAvg: hums.reduce((s, v) => s + v, 0) / hums.length,
+    };
+  }
+  const summary = historySummary.value;
+  if (summary?.records && summary?.averages) {
+    return {
+      tempMin: summary.records.temp_min.value,
+      tempMax: summary.records.temp_max.value,
+      tempAvg: summary.averages.temperature,
+      humMin: summary.records.humidity_min?.value ?? null,
+      humMax: summary.records.humidity_max.value,
+      humAvg: summary.averages.humidity,
+    };
+  }
+  if (hasDailyHistory.value) {
+    const days = dailyHistory.value.days;
+    const total = days.reduce((s, d) => s + d.count, 0);
+    const weighted = (field) => days.reduce((s, d) => s + d[field] * d.count, 0) / total;
+    return {
+      tempMin: Math.min(...days.map(d => d.temp_min)),
+      tempMax: Math.max(...days.map(d => d.temp_max)),
+      tempAvg: weighted('temp_avg'),
+      humMin: null,
+      humMax: null,
+      humAvg: weighted('humidity_avg'),
+    };
+  }
+  return null;
+});
+
+const formatHumidity = (value) => value === null || value === undefined ? '—' : `${Math.round(value)}%`;
+
+// Wykres dzienny: pasmo min–maks temperatury, średnia temperatura i średnia wilgotność
+const dailyChartData = computed(() => {
+  if (!hasDailyHistory.value) return null;
+
+  const days = dailyHistory.value.days;
+  const tempMin = Math.floor(Math.min(...days.map(d => d.temp_min)));
+  let tempMax = Math.ceil(Math.max(...days.map(d => d.temp_max)));
+  const humidityMin = Math.floor(Math.min(...days.map(d => d.humidity_avg)));
+  let humidityMax = Math.ceil(Math.max(...days.map(d => d.humidity_avg)));
+  if (tempMax === tempMin) tempMax = tempMin + 1;
+  if (humidityMax === humidityMin) humidityMax = humidityMin + 1;
+
+  const x = (i) => days.length > 1 ? (i / (days.length - 1)) * 100 : 50;
+  const tempY = (t) => 200 - ((t - tempMin) / (tempMax - tempMin)) * 200;
+  const humidityY = (h) => 200 - ((h - humidityMin) / (humidityMax - humidityMin)) * 200;
+
+  const points = days.map((day, i) => ({
+    x: x(i),
+    maxY: tempY(day.temp_max),
+    minY: tempY(day.temp_min),
+    avgY: tempY(day.temp_avg),
+    humidityY: humidityY(day.humidity_avg),
+    day,
+  }));
+
+  const upper = points.map(p => `${p.x},${p.maxY}`);
+  const lower = points.map(p => `${p.x},${p.minY}`).reverse();
+  // Szerokość kolumny dnia (obszar podpowiedzi)
+  const slot = days.length > 1 ? 100 / (days.length - 1) : 100;
+
+  // Około 6 etykiet osi X
+  const step = Math.max(1, Math.ceil(days.length / 6));
+  const labels = days
+    .map((day, i) => ({ i, day }))
+    .filter(({ i }) => i % step === 0 || i === days.length - 1)
+    .filter(({ i }, idx, arr) => !(i === days.length - 1 && idx > 0 && i - arr[idx - 1].i < step / 2))
+    .map(({ i, day }) => ({ left: x(i), label: formatDay(day.date) }));
+
+  return {
+    points,
+    band: [...upper, ...lower].join(' '),
+    avgLine: points.map(p => `${p.x},${p.avgY}`).join(' '),
+    humidityLine: points.map(p => `${p.x},${p.humidityY}`).join(' '),
+    slot,
+    labels,
+    tempMin,
+    tempMax,
+    humidityMin,
+    humidityMax,
+  };
+});
+
+const dayTooltip = (day) => [
+  formatDay(day.date, { weekday: 'long', day: 'numeric', month: 'long' }),
+  `Temperatura: ${formatTemp(day.temp_min, { decimals: 1 })} – ${formatTemp(day.temp_max, { decimals: 1 })} (średnio ${formatTemp(day.temp_avg, { decimals: 1 })})`,
+  `Wilgotność: ${formatHumidity(day.humidity_avg)}, ciśnienie: ${formatPressure(day.pressure_avg)}`,
+  `Wiatr: średnio ${formatWind(day.wind_avg)}, maks. ${formatWind(day.wind_max)}`,
+  day.description ? `Warunki: ${day.description}` : null,
+  `Pomiarów: ${day.count}`,
+].filter(Boolean).join('\n');
+
+// --- Rekordy i porównania (w jednostkach użytkownika, polski format liczb) ---
+const plNumber = (value, decimals = 1) => Number(value).toLocaleString('pl-PL', {
+  minimumFractionDigits: decimals,
+  maximumFractionDigits: decimals,
+});
+
+// Różnice: temperatura bez przesunięcia +32 (°F), pozostałe przeliczenia są liniowe
+const formatTempDelta = (delta) => {
+  const value = units.value === 'imperial' ? Math.abs(delta) * 9 / 5 : Math.abs(delta);
+  return `${plNumber(value)}${tempUnit.value}`;
+};
+const formatPressureDelta = (delta) =>
+  `${plNumber(convertPressure(Math.abs(delta)), units.value === 'imperial' ? 2 : 0)} ${pressureUnit.value}`;
+const formatWindDelta = (delta) =>
+  `${plNumber(convertWind(Math.abs(delta)), 1)} ${windUnit.value}`;
+
+const tempComparison = (delta, subject, reference) => {
+  if (delta === undefined || delta === null) return null;
+  if (Math.abs(delta) < 0.05) return { trend: 'same', text: `${subject} jest tak samo ciepło jak ${reference}` };
+  return {
+    trend: delta > 0 ? 'up' : 'down',
+    text: `${subject} jest ${delta > 0 ? 'cieplej' : 'chłodniej'} niż ${reference} o ${formatTempDelta(delta)}`,
+  };
+};
+
+const comparisonLines = computed(() => {
+  const c = historySummary.value?.comparisons;
+  if (!c?.latest) return [];
+
+  const lines = [];
+  const yesterday = c.vs_yesterday;
+  const weekAgo = c.vs_week_ago;
+
+  if (yesterday?.delta) {
+    lines.push(tempComparison(yesterday.delta.temperature, 'Teraz', 'wczoraj o tej porze'));
+
+    const p = yesterday.delta.pressure;
+    if (p !== undefined && p !== null) {
+      lines.push(Math.abs(p) < 0.5
+        ? { trend: 'same', text: 'Ciśnienie jest takie samo jak wczoraj o tej porze' }
+        : { trend: p > 0 ? 'up' : 'down', text: `Ciśnienie ${p > 0 ? 'wzrosło' : 'spadło'} od wczoraj o ${formatPressureDelta(p)}` });
+    }
+
+    const w = yesterday.delta.wind_speed;
+    if (w !== undefined && w !== null && Math.abs(w) >= 0.1) {
+      lines.push({ trend: w > 0 ? 'up' : 'down', text: `Wiatr jest ${w > 0 ? 'silniejszy' : 'słabszy'} niż wczoraj o tej porze o ${formatWindDelta(w)}` });
+    }
+  }
+
+  if (weekAgo?.delta) {
+    lines.push(tempComparison(weekAgo.delta.temperature, 'Teraz', 'tydzień temu o tej porze'));
+  }
+
+  const tw = c.today_vs_week;
+  if (tw?.delta && tw.delta.temperature !== undefined) {
+    const d = tw.delta.temperature;
+    const today = formatTemp(tw.today.temperature, { decimals: 1 });
+    const week = formatTemp(tw.week.temperature, { decimals: 1 });
+    lines.push(Math.abs(d) < 0.05
+      ? { trend: 'same', text: `Dzisiejsza średnia temperatura (${today}) jest równa średniej z ostatnich 7 dni` }
+      : {
+        trend: d > 0 ? 'up' : 'down',
+        text: `Dzisiejsza średnia temperatura (${today}) jest ${d > 0 ? 'wyższa' : 'niższa'} od średniej z ostatnich 7 dni (${week}) o ${formatTempDelta(d)}`,
+      });
+  }
+
+  return lines.filter(Boolean);
+});
+
+const historyCityId = () => {
+  return typeof props.cityId === 'string' && props.cityId.includes(',')
+    ? props.currentWeather?.id
+    : props.cityId;
+};
+
+const currentRange = () => historyRange(historyPreset.value, { from: customFrom.value, to: customTo.value });
 
 const fetchHistoricalData = async () => {
   if (!authStore.user) {
@@ -300,35 +565,89 @@ const fetchHistoricalData = async () => {
     return;
   }
 
-  const cityId = typeof props.cityId === 'string' && props.cityId.includes(',')
-    ? props.currentWeather.id
-    : props.cityId;
+  const cityId = historyCityId();
 
   if (!cityId) {
     historicalError.value = 'Brak identyfikatora miasta';
     return;
   }
 
+  const range = currentRange();
+
+  if (!range) {
+    historicalError.value = 'Podaj poprawny zakres dat';
+    return;
+  }
+
+  if (new Date(range.from) > new Date(range.to)) {
+    historicalError.value = 'Data początkowa musi być wcześniejsza niż data końcowa';
+    return;
+  }
+
+  appliedRange.value = range;
   isLoadingHistorical.value = true;
   historicalError.value = null;
+  exportError.value = null;
+
+  const daily = rangeDays(range) > 7.01;
 
   try {
-    await weatherStore.getHistoricalData(cityId);
-    historicalData.value = weatherStore.historicalData;
-    
-    if (!historicalData.value || !historicalData.value.data || historicalData.value.data.length === 0) {
-      historicalError.value = 'Brak danych historycznych dla tego miasta';
+    const [main, summary] = await Promise.all([
+      daily ? fetchHistoryDaily(cityId, range) : fetchHistorical(cityId, range),
+      // Podsumowanie jest dodatkiem – jego błąd nie blokuje wykresu
+      fetchHistorySummary(cityId, range).catch((error) => {
+        console.error('Błąd pobierania podsumowania historii:', error);
+        return null;
+      }),
+    ]);
+
+    historicalData.value = daily ? null : main;
+    dailyHistory.value = daily ? main : null;
+    historySummary.value = summary;
+
+    const empty = daily ? !main?.days?.length : !main?.data?.length;
+    if (empty) {
+      historicalError.value = 'Brak danych historycznych w wybranym okresie';
     }
   } catch (error) {
     console.error('Błąd pobierania danych historycznych:', error);
-    historicalError.value = error.message || 'Nie udało się pobrać danych historycznych';
+    historicalData.value = null;
+    dailyHistory.value = null;
+    historySummary.value = null;
+    historicalError.value = error.status === 401
+      ? 'Sesja wygasła, zaloguj się ponownie'
+      : error.message || 'Nie udało się pobrać danych historycznych';
   } finally {
     isLoadingHistorical.value = false;
   }
 };
 
+const selectHistoryPreset = (key) => {
+  historyPreset.value = key;
+  // Własny zakres ładujemy dopiero po kliknięciu "Pokaż"
+  if (key !== 'custom') fetchHistoricalData();
+};
+
+const exportCsv = async () => {
+  const cityId = historyCityId();
+  const range = appliedRange.value || currentRange();
+  if (!cityId || !range) return;
+
+  isExporting.value = true;
+  exportError.value = null;
+
+  try {
+    await exportHistoryCsv(cityId, range);
+  } catch (error) {
+    console.error('Błąd eksportu CSV:', error);
+    exportError.value = error.message || 'Nie udało się wyeksportować danych';
+  } finally {
+    isExporting.value = false;
+  }
+};
+
 watch(activeTab, (newTab) => {
-  if (newTab === 'historical' && !historicalData.value && !isLoadingHistorical.value) {
+  if (newTab === 'historical' && !appliedRange.value && !isLoadingHistorical.value) {
     fetchHistoricalData();
   }
 });
@@ -666,6 +985,29 @@ const formatDateForDaily = (timestamp) => {
         <div v-if="activeTab === 'historical'" class="historical-tab">
           <h2>Dane historyczne</h2>
 
+          <div v-if="authStore.user" class="history-toolbar">
+            <div class="chart-type-selector history-range-selector" role="group" aria-label="Zakres danych historycznych">
+              <button v-for="preset in HISTORY_PRESETS" :key="preset.key" type="button"
+                @click="selectHistoryPreset(preset.key)"
+                :class="['chart-type-button', { active: historyPreset === preset.key }]"
+                :aria-pressed="historyPreset === preset.key">
+                {{ preset.label }}
+              </button>
+            </div>
+
+            <form v-if="historyPreset === 'custom'" class="history-custom-range" @submit.prevent="fetchHistoricalData">
+              <div class="history-date-field">
+                <label class="ui-label" for="history-from">Od</label>
+                <input id="history-from" v-model="customFrom" type="date" class="ui-input" :max="customTo || todayInput" required />
+              </div>
+              <div class="history-date-field">
+                <label class="ui-label" for="history-to">Do</label>
+                <input id="history-to" v-model="customTo" type="date" class="ui-input" :min="customFrom" :max="todayInput" required />
+              </div>
+              <button type="submit" class="ui-btn ui-btn--sm" :disabled="isLoadingHistorical">Pokaż</button>
+            </form>
+          </div>
+
           <div v-if="isLoadingHistorical" class="loading-container">
             <div class="loading-spinner"></div>
             <p>Ładowanie danych historycznych...</p>
@@ -684,26 +1026,74 @@ const formatDateForDaily = (timestamp) => {
           <div v-else-if="hasHistoricalData" class="historical-data-container">
             <div class="historical-info">
               <p>Poniżej przedstawione są dane archiwalne dla miasta {{ cityName }} zbierane co 30 minut.</p>
-              <p class="data-info">
-                Łączna liczba pomiarów: <strong>{{ historicalData.data.length }}</strong> |
-                Od: <strong>{{ new Date(historicalData.data[0].timestamp).toLocaleDateString('pl-PL', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                }) }}</strong> |
-                Do: <strong>{{ new Date(historicalData.data[historicalData.data.length - 1].timestamp).toLocaleDateString('pl-PL', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                }) }}</strong>
+              <p class="data-info" v-if="historyInfo">
+                Łączna liczba pomiarów: <strong>{{ historyInfo.count }}</strong> |
+                Od: <strong>{{ formatMoment(historyInfo.from) }}</strong> |
+                Do: <strong>{{ formatMoment(historyInfo.to) }}</strong>
               </p>
+              <div class="history-export">
+                <button type="button" class="ui-btn ui-btn--sm ui-btn--secondary" :disabled="isExporting" @click="exportCsv">
+                  {{ isExporting ? 'Eksportowanie...' : 'Eksportuj do CSV' }}
+                </button>
+                <p v-if="exportError" class="ui-error-message">{{ exportError }}</p>
+              </div>
+            </div>
+
+            <div v-if="isDailyView && dailyChartData" class="historical-chart-container">
+              <h3>Temperatura dzienna (min–maks) i średnia wilgotność</h3>
+
+              <div class="historical-chart">
+                <div class="chart-legend-labels">
+                  <div class="legend-label" style="color: #ff9800;">■ Zakres min–maks ({{ tempUnit }})</div>
+                  <div class="legend-label" style="color: #e65100;">● Średnia temperatura</div>
+                  <div class="legend-label" style="color: #2196f3;">● Średnia wilgotność (%)</div>
+                </div>
+
+                <div class="chart-area">
+                  <div class="y-axis temp-axis">
+                    <div v-for="i in 5" :key="`dtemp-${i}`" class="axis-tick">
+                      {{ formatTemp(dailyChartData.tempMin + (dailyChartData.tempMax - dailyChartData.tempMin) * (5-i) / 4) }}
+                    </div>
+                  </div>
+
+                  <div class="chart-svg-container">
+                    <svg width="100%" height="220" viewBox="0 0 100 200" preserveAspectRatio="none"
+                      role="img" :aria-label="`Temperatura dzienna dla ${dailyHistory.days.length} dni`">
+                      <polygon :points="dailyChartData.band" fill="rgba(255, 152, 0, 0.25)" stroke="#ff9800"
+                        stroke-width="0.6" vector-effect="non-scaling-stroke" />
+                      <polyline :points="dailyChartData.avgLine" fill="none" stroke="#e65100" stroke-width="2"
+                        vector-effect="non-scaling-stroke" />
+                      <polyline :points="dailyChartData.humidityLine" fill="none" stroke="#2196f3" stroke-width="1.5"
+                        stroke-dasharray="3,3" vector-effect="non-scaling-stroke" />
+                      <g v-for="(point, index) in dailyChartData.points" :key="`day-${index}`" class="daily-point">
+                        <rect :x="point.x - dailyChartData.slot / 2" y="0" :width="dailyChartData.slot" height="200"
+                          fill="transparent">
+                          <title>{{ dayTooltip(point.day) }}</title>
+                        </rect>
+                      </g>
+                    </svg>
+                  </div>
+
+                  <div class="y-axis humidity-axis">
+                    <div v-for="i in 5" :key="`dhum-${i}`" class="axis-tick">
+                      {{ Math.round(dailyChartData.humidityMin + (dailyChartData.humidityMax - dailyChartData.humidityMin) * (5-i) / 4) }}%
+                    </div>
+                  </div>
+                </div>
+
+                <div class="x-axis">
+                  <div class="date-ticks daily-date-ticks">
+                    <div v-for="(tick, index) in dailyChartData.labels" :key="`dlabel-${index}`"
+                      :style="{ left: `${tick.left}%` }" class="daily-date-tick">
+                      {{ tick.label }}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="historical-chart-container">
+              <template v-if="!isDailyView && hasRawHistory">
               <h3>Wykres temperatury i wilgotności</h3>
               
               <div class="historical-chart">
@@ -765,22 +1155,13 @@ const formatDateForDaily = (timestamp) => {
                 
                 <div class="x-axis">
                   <div v-if="historicalData.data.length > 20" class="date-range">
-                    <span>{{ new Date(historicalData.data[0].timestamp).toLocaleDateString('pl-PL', {
-                      day: 'numeric',
-                      month: 'short'
-                    }) }}</span>
-                    <span>{{ new Date(historicalData.data[Math.floor(historicalData.data.length / 2)].timestamp).toLocaleDateString('pl-PL', {
-                      day: 'numeric',
-                      month: 'short'
-                    }) }}</span>
-                    <span>{{ new Date(historicalData.data[historicalData.data.length - 1].timestamp).toLocaleDateString('pl-PL', {
-                      day: 'numeric',
-                      month: 'short'
-                    }) }}</span>
+                    <span>{{ rawAxisLabel(historicalData.data[0].timestamp) }}</span>
+                    <span>{{ rawAxisLabel(historicalData.data[Math.floor(historicalData.data.length / 2)].timestamp) }}</span>
+                    <span>{{ rawAxisLabel(historicalData.data[historicalData.data.length - 1].timestamp) }}</span>
                   </div>
                   <div v-else class="date-ticks">
                     <div v-for="(item, index) in historicalData.data" :key="`date-${index}`" 
-                      :style="{ left: `${(index / (historicalData.data.length - 1)) * 100}%` }"
+                      :style="{ left: `${historicalData.data.length > 1 ? (index / (historicalData.data.length - 1)) * 100 : 50}%` }"
                       class="date-tick">
                       {{ new Date(item.timestamp).toLocaleDateString('pl-PL', {
                         day: 'numeric',
@@ -791,47 +1172,100 @@ const formatDateForDaily = (timestamp) => {
                   </div>
                 </div>
               </div>
+              </template>
               
               <div class="historical-stats">
                 <h3>Statystyki</h3>
-                <div class="stats-grid">
+                <div class="stats-grid" v-if="historyStats">
                   <div class="stat-item">
                     <div class="stat-label">Minimalna temperatura</div>
                     <div class="stat-value temp-value">
-                      {{ formatTemp(Math.min(...historicalData.data.map(d => d.temperature)), { decimals: 1 }) }}
+                      {{ formatTemp(historyStats.tempMin, { decimals: 1 }) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Maksymalna temperatura</div>
                     <div class="stat-value temp-value">
-                      {{ formatTemp(Math.max(...historicalData.data.map(d => d.temperature)), { decimals: 1 }) }}
+                      {{ formatTemp(historyStats.tempMax, { decimals: 1 }) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Średnia temperatura</div>
                     <div class="stat-value temp-value">
-                      {{ formatTemp(historicalData.data.reduce((sum, d) => sum + d.temperature, 0) / historicalData.data.length, { decimals: 1 }) }}
+                      {{ formatTemp(historyStats.tempAvg, { decimals: 1 }) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Minimalna wilgotność</div>
                     <div class="stat-value humidity-value">
-                      {{ Math.min(...historicalData.data.map(d => d.humidity)) }}%
+                      {{ formatHumidity(historyStats.humMin) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Maksymalna wilgotność</div>
                     <div class="stat-value humidity-value">
-                      {{ Math.max(...historicalData.data.map(d => d.humidity)) }}%
+                      {{ formatHumidity(historyStats.humMax) }}
                     </div>
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Średnia wilgotność</div>
                     <div class="stat-value humidity-value">
-                      {{ Math.round(historicalData.data.reduce((sum, d) => sum + d.humidity, 0) / historicalData.data.length) }}%
+                      {{ formatHumidity(historyStats.humAvg) }}
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div v-if="historySummary && historySummary.records" class="historical-stats">
+                <h3>Rekordy w wybranym okresie</h3>
+                <div class="stats-grid">
+                  <div class="stat-item">
+                    <div class="stat-label">Najcieplej</div>
+                    <div class="stat-value temp-value">{{ formatTemp(historySummary.records.temp_max.value, { decimals: 1 }) }}</div>
+                    <div class="stat-date">{{ formatShortMoment(historySummary.records.temp_max.timestamp) }}</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-label">Najzimniej</div>
+                    <div class="stat-value temp-value">{{ formatTemp(historySummary.records.temp_min.value, { decimals: 1 }) }}</div>
+                    <div class="stat-date">{{ formatShortMoment(historySummary.records.temp_min.timestamp) }}</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-label">Najsilniejszy wiatr</div>
+                    <div class="stat-value wind-value">{{ formatWind(historySummary.records.wind_max.value) }}</div>
+                    <div class="stat-date">{{ formatShortMoment(historySummary.records.wind_max.timestamp) }}</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-label">Najwyższe ciśnienie</div>
+                    <div class="stat-value pressure-value">{{ formatPressure(historySummary.records.pressure_max.value) }}</div>
+                    <div class="stat-date">{{ formatShortMoment(historySummary.records.pressure_max.timestamp) }}</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-label">Najniższe ciśnienie</div>
+                    <div class="stat-value pressure-value">{{ formatPressure(historySummary.records.pressure_min.value) }}</div>
+                    <div class="stat-date">{{ formatShortMoment(historySummary.records.pressure_min.timestamp) }}</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-label">Najwyższa wilgotność</div>
+                    <div class="stat-value humidity-value">{{ formatHumidity(historySummary.records.humidity_max.value) }}</div>
+                    <div class="stat-date">{{ formatShortMoment(historySummary.records.humidity_max.timestamp) }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="comparisonLines.length" class="historical-stats">
+                <h3>Porównanie</h3>
+                <p class="comparison-reference" v-if="historySummary.comparisons.latest">
+                  Najnowszy pomiar: {{ formatMoment(historySummary.comparisons.latest.timestamp) }},
+                  {{ formatTemp(historySummary.comparisons.latest.temperature, { decimals: 1 }) }}
+                </p>
+                <ul class="comparison-list">
+                  <li v-for="(line, index) in comparisonLines" :key="`cmp-${index}`" class="comparison-item">
+                    <span :class="['comparison-trend', `trend-${line.trend}`]" aria-hidden="true">
+                      {{ line.trend === 'up' ? '▲' : line.trend === 'down' ? '▼' : '=' }}
+                    </span>
+                    <span>{{ line.text }}</span>
+                  </li>
+                </ul>
               </div>
             </div>
           </div>
@@ -1348,6 +1782,174 @@ const formatDateForDaily = (timestamp) => {
 
 .humidity-value {
   color: #2196f3;
+}
+
+/* --- Zakres historii, wykres dzienny, rekordy i porównania --- */
+.history-toolbar {
+  margin-bottom: 1.5rem;
+}
+
+.history-range-selector {
+  margin-bottom: 1rem;
+}
+
+.history-custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.history-date-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+}
+
+.history-date-field .ui-input {
+  padding: 0.5rem 0.75rem;
+}
+
+.history-export {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.daily-date-ticks {
+  margin: 0 50px;
+  height: 20px;
+}
+
+.daily-date-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  top: 0;
+}
+
+.daily-point rect {
+  cursor: help;
+}
+
+.daily-point:hover rect {
+  fill: rgba(59, 130, 246, 0.08);
+}
+
+.stat-date {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+}
+
+.wind-value {
+  color: #0f766e;
+}
+
+.pressure-value {
+  color: #4caf50;
+}
+
+.historical-stats h3 {
+  font-size: 1.25rem;
+  color: #1e293b;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.comparison-reference {
+  text-align: center;
+  font-size: 0.875rem;
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.comparison-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.comparison-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  background-color: #f8fafc;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  color: #1e293b;
+}
+
+.comparison-trend {
+  flex-shrink: 0;
+  width: 1.25rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.trend-up {
+  color: #ef4444;
+}
+
+.trend-down {
+  color: #3b82f6;
+}
+
+.trend-same {
+  color: #64748b;
+}
+
+/* --- Telefony: brak poziomego przewijania (długie nazwy miast, wykresy) --- */
+.weather-details-page {
+  min-width: 0;
+}
+
+.city-name,
+.weather-description,
+.overview-description,
+.hourly-description,
+.daily-description,
+.daily-date {
+  overflow-wrap: anywhere;
+}
+
+.chart-area,
+.chart-svg-container {
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .main-weather-card {
+    padding: 1.25rem;
+  }
+
+  .city-name {
+    font-size: 2rem;
+  }
+
+  .current-temp {
+    font-size: 3.25rem;
+  }
+
+  .tab-content {
+    padding: 1rem;
+  }
+
+  .historical-data-container,
+  .historical-chart,
+  .historical-stats {
+    padding: 1rem 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .history-date-field {
+    flex: 1 1 100%;
+  }
 }
 
 .overview-tab h2 {
