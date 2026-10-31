@@ -3,6 +3,8 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
 import { ref, computed } from "vue";
 import { visibleNavigation } from "./navigation";
+import OfflineBanner from "./components/OfflineBanner.vue";
+import AlertsBell from "./components/alerts/AlertsBell.vue";
 
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
@@ -40,6 +42,8 @@ const closeMobileMenu = () => {
               <span class="logo-icon">☁️</span>
               <span class="logo-text">Poland&World Weather</span>
             </RouterLink>
+
+            <AlertsBell class="ml-auto mr-1 md:hidden" />
             
             <button 
               class="mobile-menu-btn" 
@@ -81,6 +85,7 @@ const closeMobileMenu = () => {
             </RouterLink>
             
             <div v-if="authStore.user" class="user-nav">
+              <AlertsBell />
               <span class="user-greeting">
                 Witaj, {{ authStore.user.name }}
               </span>
@@ -151,6 +156,7 @@ const closeMobileMenu = () => {
         </div>
       </nav>
     </header>
+    <OfflineBanner />
 
     <RouterView />
     
