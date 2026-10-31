@@ -77,11 +77,15 @@ if [ ! -f .env ]; then
     fi
 fi
 
+# Starsze pliki .env mogą nie mieć portu Mailpit
+[ -n "$(get_env .env MAILPIT_PORT)" ] || set_env .env MAILPIT_PORT 8025
+
 # Porty sprawdzamy tylko, gdy nasze kontenery nie działają (inaczej same je zajmują)
 if [ -z "$(docker compose ps -q 2>/dev/null)" ]; then
     ensure_free_port FRONTEND_PORT
     ensure_free_port BACKEND_PORT
     ensure_free_port DB_HOST_PORT
+    ensure_free_port MAILPIT_PORT
 fi
 
 if [ ! -f backend/.env ]; then
@@ -129,6 +133,7 @@ echo
 info "Gotowe!"
 echo "  Frontend:  http://localhost:${FRONTEND_PORT}"
 echo "  API:       http://localhost:${BACKEND_PORT}/api"
+echo "  Mailpit:   http://localhost:$(get_env .env MAILPIT_PORT) (podgląd wysłanych maili)"
 echo "  MySQL:     localhost:$(get_env .env DB_HOST_PORT) (użytkownik: $(get_env .env DB_USERNAME), hasło: $(get_env .env DB_PASSWORD))"
 echo
 echo "Przydatne polecenia:"

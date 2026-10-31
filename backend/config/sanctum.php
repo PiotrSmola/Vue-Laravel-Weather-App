@@ -46,7 +46,8 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Domyślnie 30 dni (w minutach)
+    'expiration' => (int) env('SANCTUM_EXPIRATION', 60 * 24 * 30),
 
     /*
     |--------------------------------------------------------------------------

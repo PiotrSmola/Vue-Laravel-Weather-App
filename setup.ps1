@@ -66,11 +66,15 @@ function Confirm-FreePort([string]$Key) {
     }
 }
 
+# Starsze pliki .env mogą nie mieć portu Mailpit
+if (-not (Get-EnvValue '.env' 'MAILPIT_PORT')) { Set-EnvValue '.env' 'MAILPIT_PORT' '8025' }
+
 # Porty sprawdzamy tylko, gdy nasze kontenery nie działają (inaczej same je zajmują)
 if (-not (docker compose ps -q 2>$null)) {
     Confirm-FreePort 'FRONTEND_PORT'
     Confirm-FreePort 'BACKEND_PORT'
     Confirm-FreePort 'DB_HOST_PORT'
+    Confirm-FreePort 'MAILPIT_PORT'
 }
 
 if (-not (Test-Path 'backend\.env')) {
@@ -120,11 +124,13 @@ if (-not $NoFetch -and $CurrentKey) {
 $DbPort = Get-EnvValue '.env' 'DB_HOST_PORT'
 $DbUser = Get-EnvValue '.env' 'DB_USERNAME'
 $DbPass = Get-EnvValue '.env' 'DB_PASSWORD'
+$MailpitPort = Get-EnvValue '.env' 'MAILPIT_PORT'
 
 Write-Host ''
 Info 'Gotowe!'
 Write-Host "  Frontend:  http://localhost:$FrontendPort"
 Write-Host "  API:       http://localhost:$BackendPort/api"
+Write-Host "  Mailpit:   http://localhost:$MailpitPort (podgląd wysłanych maili)"
 Write-Host "  MySQL:     localhost:$DbPort (użytkownik: $DbUser, hasło: $DbPass)"
 Write-Host ''
 Write-Host 'Przydatne polecenia:'

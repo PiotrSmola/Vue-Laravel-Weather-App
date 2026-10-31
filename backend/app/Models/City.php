@@ -24,11 +24,12 @@ class City extends Model
 
     public function users()
     {
-        return $this->belongsToMany(User::class, 'user_cities');
+        return $this->belongsToMany(User::class, 'user_cities')->withTimestamps();
     }
 
+    // Najnowszy pomiar (wg czasu pomiaru)
     public function currentWeather()
     {
-        return $this->hasOne(WeatherData::class)->latest();
+        return $this->hasOne(WeatherData::class)->latestOfMany('measured_at');
     }
 }

@@ -7,6 +7,10 @@ x-backend-env: &backend-env
   DB_DATABASE: ${DB_DATABASE:-weather_app}
   DB_USERNAME: ${DB_USERNAME:-weather}
   DB_PASSWORD: ${DB_PASSWORD:-weather}
+  # Poczta: Mailpit (podgląd wiadomości w przeglądarce)
+  MAIL_MAILER: smtp
+  MAIL_HOST: mailpit
+  MAIL_PORT: 1025
 
 services:
   db:
@@ -71,6 +75,34 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+  # Przetwarza zadania z kolejki (QUEUE_CONNECTION=database): maile, powiadomienia push
+  queue:
+    build:
+      context: ./backend
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: weather-app-backend
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      CONTAINER_ROLE: queue
+    volumes:
+      - ./backend:/var/www/html
+      - backend-vendor:/var/www/html/vendor
+    depends_on:
+      backend:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  # Testowy serwer SMTP - wysłane maile widać w przeglądarce
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"
 
   frontend:
     image: node:20-alpine

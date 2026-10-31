@@ -8,6 +8,11 @@ if [ "$CONTAINER_ROLE" = "scheduler" ]; then
     exec php artisan schedule:work
 fi
 
+if [ "$CONTAINER_ROLE" = "queue" ]; then
+    echo "Uruchamianie przetwarzania kolejki Laravela..."
+    exec php artisan queue:work --tries=3
+fi
+
 if [ ! -f .env ]; then
     echo "Brak pliku .env - kopiowanie z .env.example"
     cp .env.example .env
