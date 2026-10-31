@@ -24,7 +24,9 @@ class City extends Model
 
     public function users()
     {
-        return $this->belongsToMany(User::class, 'user_cities')->withTimestamps();
+        return $this->belongsToMany(User::class, 'user_cities')
+            ->withPivot(['position', 'alias'])
+            ->withTimestamps();
     }
 
     // Najnowszy pomiar (wg czasu pomiaru)

@@ -35,9 +35,17 @@ class CityController extends Controller
 
     public function getUserCities(Request $request)
     {
-        $cities = $request->user()->cities()->with('currentWeather')->get();
+        // Kolejność ustawiona przez użytkownika, przy równej pozycji - wg daty dodania
+        $cities = $request->user()->cities()
+            ->with('currentWeather')
+            ->orderBy('user_cities.position')
+            ->orderBy('user_cities.created_at')
+            ->orderBy('user_cities.id')
+            ->get();
 
         $cities->each(function ($city) {
+            $city->alias = $city->pivot->alias;
+            $city->position = (int) $city->pivot->position;
             $city->current_temp = optional($city->currentWeather)->temperature;
             $city->current_condition = optional($city->currentWeather)->weather_condition;
             $city->current_icon = optional($city->currentWeather)->weather_icon;
@@ -74,7 +82,9 @@ class CityController extends Controller
             return response()->json(['error' => 'Miasto już jest w ulubionych'], 400);
         }
 
-        $user->cities()->attach($city->id);
+        // Nowe ulubione trafia na koniec listy
+        $position = (int) $user->cities()->max('user_cities.position') + ($user->cities()->exists() ? 1 : 0);
+        $user->cities()->attach($city->id, ['position' => $position]);
 
         return response()->json([
             'message' => 'Miasto dodane do ulubionych',
