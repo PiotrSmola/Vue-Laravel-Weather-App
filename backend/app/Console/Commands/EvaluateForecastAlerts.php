@@ -32,7 +32,7 @@ class EvaluateForecastAlerts extends Command
         }
 
         $cities = City::whereIn('id', $cityIds)->orderBy('id')->get();
-        $delay = (int) config('weather.update_delay_ms', 1000);
+        $delay = (int) config('weather.update_delay_ms', 1500);
         $triggered = 0;
         $failed = 0;
 

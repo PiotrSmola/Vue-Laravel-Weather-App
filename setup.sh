@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Konfiguruje i uruchamia Weather App w Dockerze (Linux / macOS / Git Bash).
+# Konfiguruje i uruchamia Poland&World Weather w Dockerze (Linux / macOS / Git Bash).
 # Użycie: ./setup.sh [--api-key KLUCZ] [--no-fetch]
 set -euo pipefail
 
@@ -92,7 +92,7 @@ if [ ! -f backend/.env ]; then
     info "Tworzenie backend/.env z backend/.env.example..."
     cp backend/.env.example backend/.env
 fi
-set_env backend/.env APP_NAME '"Weather App"'
+set_env backend/.env APP_NAME '"Poland&World Weather"'
 set_env backend/.env APP_URL "http://localhost:$(get_env .env BACKEND_PORT)"
 
 CURRENT_KEY="$(get_env backend/.env OPENWEATHER_API_KEY)"

@@ -31,7 +31,7 @@ class UpdateWeatherData extends Command
 
         $successCount = 0;
         $failCount = 0;
-        $delay = (int) config('weather.update_delay_ms', 1000);
+        $delay = (int) config('weather.update_delay_ms', 1500);
 
         foreach ($openweatherIds as $index => $openweatherId) {
             if ($index > 0 && $delay > 0) {

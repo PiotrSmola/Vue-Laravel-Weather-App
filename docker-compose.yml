@@ -60,7 +60,7 @@ services:
       retries: 60
       start_period: 30s
 
-  # Uruchamia harmonogram Laravela (weather:update co 30 minut)
+  # Uruchamia harmonogram Laravela (weather:update, air:update, alerts:forecast)
   scheduler:
     build:
       context: ./backend

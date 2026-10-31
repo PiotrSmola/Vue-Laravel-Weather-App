@@ -1,4 +1,4 @@
-﻿# Konfiguruje i uruchamia Weather App w Dockerze (Windows PowerShell 5.1+ / PowerShell 7).
+﻿# Konfiguruje i uruchamia Poland&World Weather w Dockerze (Windows PowerShell 5.1+ / PowerShell 7).
 # Użycie: .\setup.ps1 [-ApiKey KLUCZ] [-NoFetch]
 # Jeśli skrypty są zablokowane: powershell -ExecutionPolicy Bypass -File .\setup.ps1
 [CmdletBinding()]
@@ -83,7 +83,7 @@ if (-not (Test-Path 'backend\.env')) {
 }
 $BackendPort = Get-EnvValue '.env' 'BACKEND_PORT'
 $FrontendPort = Get-EnvValue '.env' 'FRONTEND_PORT'
-Set-EnvValue 'backend\.env' 'APP_NAME' '"Weather App"'
+Set-EnvValue 'backend\.env' 'APP_NAME' '"Poland&World Weather"'
 Set-EnvValue 'backend\.env' 'APP_URL' "http://localhost:$BackendPort"
 
 $CurrentKey = Get-EnvValue 'backend\.env' 'OPENWEATHER_API_KEY'

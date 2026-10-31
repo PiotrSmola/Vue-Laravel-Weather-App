@@ -29,7 +29,7 @@ class UpdateAirQualityData extends Command
 
         $successCount = 0;
         $failCount = 0;
-        $delay = (int) config('weather.update_delay_ms', 1000);
+        $delay = (int) config('weather.update_delay_ms', 1500);
 
         foreach ($cities as $index => $city) {
             if ($index > 0 && $delay > 0) {
