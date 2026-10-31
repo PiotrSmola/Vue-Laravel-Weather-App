@@ -11,6 +11,10 @@ x-backend-env: &backend-env
   MAIL_MAILER: smtp
   MAIL_HOST: mailpit
   MAIL_PORT: 1025
+  # Język komunikatów backendu (walidacja, maile)
+  APP_LOCALE: pl
+  # Adres frontendu: CORS oraz linki w mailach (reset hasła, weryfikacja e-maila)
+  FRONTEND_URL: http://localhost:${FRONTEND_PORT:-5173}
 
 services:
   db:
