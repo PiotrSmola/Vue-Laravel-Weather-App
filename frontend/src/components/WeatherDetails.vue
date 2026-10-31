@@ -1903,6 +1903,49 @@ const formatDateForDaily = (timestamp) => {
   color: #64748b;
 }
 
+/* --- Telefony: brak poziomego przewijania (długie nazwy miast, wykresy) --- */
+.weather-details-page {
+  min-width: 0;
+}
+
+.city-name,
+.weather-description,
+.overview-description,
+.hourly-description,
+.daily-description,
+.daily-date {
+  overflow-wrap: anywhere;
+}
+
+.chart-area,
+.chart-svg-container {
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .main-weather-card {
+    padding: 1.25rem;
+  }
+
+  .city-name {
+    font-size: 2rem;
+  }
+
+  .current-temp {
+    font-size: 3.25rem;
+  }
+
+  .tab-content {
+    padding: 1rem;
+  }
+
+  .historical-data-container,
+  .historical-chart,
+  .historical-stats {
+    padding: 1rem 0.75rem;
+  }
+}
+
 @media (max-width: 480px) {
   .history-date-field {
     flex: 1 1 100%;
