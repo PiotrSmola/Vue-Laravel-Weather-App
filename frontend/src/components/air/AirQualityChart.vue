@@ -117,19 +117,34 @@ function formatTick(timestamp) {
     return date.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
   }
   if (spanHours.value <= 24 * 8) {
-    return date.toLocaleDateString("pl-PL", { weekday: "short", day: "numeric" }) +
-      " " + date.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleDateString("pl-PL", { weekday: "short", day: "numeric" });
   }
   return date.toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
 }
 
+// Etykiety osi X w "okrągłych" miejscach: pełne godziny (krótki zakres) lub północ (dni)
 const xTicks = computed(() => {
   const { min, max } = timeRange.value;
-  const count = 5;
-  return Array.from({ length: count }, (_, i) => {
-    const t = min + ((max - min) * i) / (count - 1);
-    return { left: (i / (count - 1)) * 100, label: formatTick(t) };
-  });
+  const hour = 3600 * 1000;
+  let step;
+  const first = new Date(min);
+
+  if (spanHours.value <= 36) {
+    step = Math.max(1, Math.ceil(spanHours.value / 6)) * hour;
+    first.setMinutes(0, 0, 0);
+  } else {
+    step = Math.max(1, Math.ceil(spanHours.value / 24 / 7)) * 24 * hour;
+    first.setHours(0, 0, 0, 0);
+  }
+
+  const ticks = [];
+  for (let t = first.getTime(); t <= max; t += step) {
+    // Krok w dniach liczony w czasie lokalnym (zmiana czasu letni/zimowy)
+    const aligned = spanHours.value <= 36 ? t : new Date(t + 12 * hour).setHours(0, 0, 0, 0);
+    if (aligned < min) continue;
+    ticks.push({ left: (xOf(aligned) / WIDTH) * 100, label: formatTick(aligned) });
+  }
+  return ticks;
 });
 
 // Podpowiedź po najechaniu / dotknięciu wykresu
@@ -253,7 +268,7 @@ function formatFull(timestamp) {
             v-for="(tick, i) in xTicks"
             :key="i"
             class="aq-x-tick"
-            :class="{ first: i === 0, last: i === xTicks.length - 1 }"
+            :class="{ first: tick.left < 6, last: tick.left > 94 }"
             :style="{ left: `${tick.left}%` }"
           >
             {{ tick.label }}
@@ -380,10 +395,9 @@ function formatFull(timestamp) {
   transform: translateX(-100%);
 }
 
-/* Na wąskim ekranie tylko skrajne i środkowa etykieta */
+/* Na wąskim ekranie co druga etykieta */
 @media (max-width: 480px) {
-  .aq-x-tick:nth-child(2),
-  .aq-x-tick:nth-child(4) {
+  .aq-x-tick:nth-child(even) {
     display: none;
   }
 }
