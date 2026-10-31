@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\MapController;
 use App\Models\User;
+use App\Services\OpenWeatherClient;
 use App\Services\WeatherService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\FakesOpenWeather;
 use Tests\Fixtures\OpenWeatherFixtures;
@@ -42,7 +45,7 @@ class MapTest extends TestCase
 
         $this->assertSame(self::PNG, $response->getContent());
         $this->assertSame('image/png', $response->headers->get('Content-Type'));
-        $this->assertStringContainsString('max-age=1800', $response->headers->get('Cache-Control'));
+        $this->assertStringContainsString('max-age=3600', $response->headers->get('Cache-Control'));
         $this->assertStringContainsString('public', $response->headers->get('Cache-Control'));
 
         Http::assertSent(fn (Request $request) => str_starts_with($request->url(), 'https://tile.openweathermap.org/map/temp_new/3/4/2.png')
@@ -76,7 +79,7 @@ class MapTest extends TestCase
     {
         $this->fakeTiles();
 
-        foreach (['13/0/0', '2/4/0', '2/0/4', '0/1/0', '1/2/1'] as $coords) {
+        foreach (['11/0/0', '13/0/0', '2/4/0', '2/0/4', '0/1/0', '1/2/1'] as $coords) {
             $this->getJson("/api/map/tiles/wind_new/{$coords}.png")
                 ->assertStatus(422)
                 ->assertJsonPath('error', 'Nieprawidłowe współrzędne kafelka');
@@ -86,22 +89,60 @@ class MapTest extends TestCase
         $this->getJson('/api/map/tiles/wind_new/-1/0/0.png')->assertNotFound();
         $this->getJson('/api/map/tiles/wind_new/a/0/0.png')->assertNotFound();
 
-        $this->get('/api/map/tiles/wind_new/12/4095/4095.png')->assertOk();
+        $this->get('/api/map/tiles/wind_new/10/1023/1023.png')->assertOk();
         $this->get('/api/map/tiles/pressure_new/0/0/0.png')->assertOk();
 
         Http::assertSentCount(2);
     }
 
-    public function test_upstream_error_is_not_leaked_or_cached(): void
+    public function test_upstream_error_returns_transparent_fallback_not_cached(): void
     {
         $this->fakeTiles(401);
 
-        $this->getJson('/api/map/tiles/precipitation_new/1/0/0.png')
-            ->assertStatus(502)
-            ->assertExactJson(['error' => 'Nie udało się pobrać kafelka mapy']);
-        $this->getJson('/api/map/tiles/precipitation_new/1/0/0.png')->assertStatus(502);
+        $response = $this->get('/api/map/tiles/precipitation_new/1/0/0.png')
+            ->assertOk()
+            ->assertHeader('X-Tile-Fallback', '1')
+            ->assertHeader('Content-Type', 'image/png');
+        $this->assertSame(MapController::transparentPng(), $response->getContent());
+        $this->assertStringContainsString('max-age=60', $response->headers->get('Cache-Control'));
+
+        $this->get('/api/map/tiles/precipitation_new/1/0/0.png')->assertHeader('X-Tile-Fallback', '1');
 
         Http::assertSentCount(2);
+    }
+
+    public function test_transparent_png_is_valid_256x256(): void
+    {
+        $png = MapController::transparentPng();
+
+        $this->assertStringStartsWith("\x89PNG\r\n\x1a\n", $png);
+        $this->assertSame([256, 256], array_values(unpack('N2', substr($png, 16, 8))));
+    }
+
+    public function test_tile_budget_exhaustion_returns_fallback_without_upstream_calls(): void
+    {
+        config(['weather.tile_rate_limit_per_minute' => 2]);
+        $this->fakeTiles();
+
+        $this->get('/api/map/tiles/temp_new/1/0/0.png')->assertOk()->assertHeaderMissing('X-Tile-Fallback');
+        $this->get('/api/map/tiles/temp_new/1/0/1.png')->assertOk()->assertHeaderMissing('X-Tile-Fallback');
+
+        $fallback = $this->get('/api/map/tiles/temp_new/1/1/0.png')->assertOk()->assertHeader('X-Tile-Fallback', '1');
+        $this->assertSame(MapController::transparentPng(), $fallback->getContent());
+
+        // Kafelki z cache są nadal serwowane
+        $cached = $this->get('/api/map/tiles/temp_new/1/0/0.png')->assertOk()->assertHeaderMissing('X-Tile-Fallback');
+        $this->assertSame(self::PNG, $cached->getContent());
+
+        Http::assertSentCount(2);
+
+        // Limit kafelków nie zużywa limitu danych pogodowych
+        $this->assertSame(0, RateLimiter::attempts(OpenWeatherClient::RATE_LIMIT_KEY));
+
+        // Po minucie limit się odnawia
+        $this->travel(61)->seconds();
+        $this->get('/api/map/tiles/temp_new/1/1/0.png')->assertOk()->assertHeaderMissing('X-Tile-Fallback');
+        Http::assertSentCount(3);
     }
 
     public function test_tiles_are_rate_limited(): void

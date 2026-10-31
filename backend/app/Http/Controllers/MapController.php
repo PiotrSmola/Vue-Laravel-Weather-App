@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Mapa pogodowa: proxy kafelków OpenWeather oraz lista miast ze współrzędnymi
@@ -16,6 +17,9 @@ use Illuminate\Support\Facades\Log;
  */
 class MapController extends Controller
 {
+    // Osobny licznik pobrań kafelków z OpenWeather (weather.tile_rate_limit_per_minute)
+    public const TILE_RATE_LIMIT_KEY = 'openweather-tiles';
+
     public function __construct(protected WeatherService $weather)
     {
     }
@@ -23,6 +27,8 @@ class MapController extends Controller
     /**
      * GET /api/map/tiles/{layer}/{z}/{x}/{y}.png
      * Kafelek warstwy pogodowej. Klucz API dodawany po stronie serwera, obraz cache'owany.
+     * Gdy limit pobrań kafelków jest wyczerpany lub API zwróci błąd - przezroczysty kafelek
+     * (HTTP 200, nagłówek X-Tile-Fallback: 1, krótki czas cache), żeby mapa działała dalej.
      */
     public function tile(string $layer, int $z, int $x, int $y)
     {
@@ -30,14 +36,14 @@ class MapController extends Controller
             return response()->json(['error' => 'Nieznana warstwa mapy'], 404);
         }
 
-        $maxZoom = (int) config('weather.map.max_zoom', 12);
+        $maxZoom = (int) config('weather.map.max_zoom', 10);
         $max = 2 ** min($z, 30) - 1;
 
         if ($z < 0 || $z > $maxZoom || $x < 0 || $y < 0 || $x > $max || $y > $max) {
             return response()->json(['error' => 'Nieprawidłowe współrzędne kafelka'], 422);
         }
 
-        $minutes = (int) config('weather.map.tile_cache_minutes', 30);
+        $minutes = max(60, (int) config('weather.map.tile_cache_minutes', 60));
         $cache = Cache::store(config('weather.map.tile_cache_store') ?: null);
         $key = "weather:tile:{$layer}:{$z}:{$x}:{$y}";
 
@@ -45,10 +51,14 @@ class MapController extends Controller
         $encoded = $cache->get($key);
 
         if ($encoded === null) {
+            if (!$this->acquireTileBudget()) {
+                return $this->fallbackTile();
+            }
+
             $bytes = $this->fetchTile($layer, $z, $x, $y);
 
             if ($bytes === null) {
-                return response()->json(['error' => 'Nie udało się pobrać kafelka mapy'], 502);
+                return $this->fallbackTile();
             }
 
             $encoded = base64_encode($bytes);
@@ -113,6 +123,55 @@ class MapController extends Controller
                 'measured_at' => $weather?->measured_at?->toIso8601String(),
             ];
         })->values();
+    }
+
+    // Rezerwuje jedno pobranie kafelka z osobnego limitu na minutę (0 = bez limitu)
+    protected function acquireTileBudget(): bool
+    {
+        $limit = (int) config('weather.tile_rate_limit_per_minute', 30);
+
+        if ($limit <= 0) {
+            return true;
+        }
+
+        if (RateLimiter::tooManyAttempts(self::TILE_RATE_LIMIT_KEY, $limit)) {
+            return false;
+        }
+
+        RateLimiter::hit(self::TILE_RATE_LIMIT_KEY, 60);
+
+        return true;
+    }
+
+    // Przezroczysty kafelek 256x256 - przeglądarka spróbuje ponownie po minucie
+    protected function fallbackTile()
+    {
+        return response(self::transparentPng(), 200, [
+            'Content-Type' => 'image/png',
+            'Cache-Control' => 'public, max-age=60',
+            'X-Tile-Fallback' => '1',
+        ]);
+    }
+
+    // Przezroczysty PNG 256x256 (RGBA) budowany bez GD
+    public static function transparentPng(): string
+    {
+        static $png = null;
+
+        if ($png !== null) {
+            return $png;
+        }
+
+        $chunk = fn (string $type, string $data) => pack('N', strlen($data)) . $type . $data
+            . pack('N', crc32($type . $data));
+
+        // Każdy wiersz: bajt filtra (0) + 256 pikseli x 4 bajty (wszystko zero = przezroczyste)
+        $raw = str_repeat("\0" . str_repeat("\0", 256 * 4), 256);
+
+        return $png = "\x89PNG\r\n\x1a\n"
+            . $chunk('IHDR', pack('NNCCCCC', 256, 256, 8, 6, 0, 0, 0))
+            . $chunk('IDAT', gzcompress($raw, 9))
+            . $chunk('IEND', '');
     }
 
     // Pobiera kafelek z OpenWeather. null = błąd (zalogowany, bez szczegółów dla klienta)

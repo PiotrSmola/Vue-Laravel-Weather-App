@@ -31,11 +31,11 @@ return [
     'map' => [
         'tiles_url' => env('WEATHER_TILES_URL', 'https://tile.openweathermap.org'),
         'layers' => ['temp_new', 'precipitation_new', 'clouds_new', 'wind_new', 'pressure_new'],
-        'max_zoom' => 12,
-        'tile_cache_minutes' => (int) env('WEATHER_TILE_CACHE_MINUTES', 30),
+        'max_zoom' => 10,
+        'tile_cache_minutes' => (int) env('WEATHER_TILE_CACHE_MINUTES', 60),
         // Magazyn cache dla kafelków (binarne PNG) - domyślnie pliki
         'tile_cache_store' => env('WEATHER_TILE_CACHE_STORE', 'file'),
-        // Limit zapytań o kafelki na minutę (na adres IP)
+        // Limit zapytań przeglądarki o kafelki na minutę (na adres IP; kafelki z cache też się liczą)
         'tile_rate_limit' => (int) env('WEATHER_TILE_RATE_LIMIT', 300),
     ],
 
@@ -48,7 +48,14 @@ return [
     'history_max_days' => 366,
 
     // Przerwa między zapytaniami w weather:update (w milisekundach) - limit darmowego API
-    'update_delay_ms' => (int) env('WEATHER_UPDATE_DELAY_MS', 1000),
+    // (1300 ms ≈ 46 zapytań/min, poniżej weather.rate_limit_per_minute)
+    'update_delay_ms' => (int) env('WEATHER_UPDATE_DELAY_MS', 1300),
+
+    // Globalny limit zapytań wychodzących do API OpenWeatherMap na minutę (darmowy plan: 60/min).
+    // Po wyczerpaniu zapytania nie są wysyłane - klient dostaje 503. 0 = bez limitu.
+    'rate_limit_per_minute' => (int) env('WEATHER_RATE_LIMIT_PER_MINUTE', 50),
+    // Osobny, mniejszy limit dla kafelków mapy (mapa nie może wyczerpać limitu danych pogodowych)
+    'tile_rate_limit_per_minute' => (int) env('WEATHER_TILE_RATE_LIMIT_PER_MINUTE', 30),
 
     'default_cities' => [
         756135,
