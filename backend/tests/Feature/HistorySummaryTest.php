@@ -61,6 +61,7 @@ class HistorySummaryTest extends TestCase
             ->assertJsonPath('records.pressure_max.value', 1030)
             ->assertJsonPath('records.pressure_min.value', 990)
             ->assertJsonPath('records.humidity_max.value', 99)
+            ->assertJsonPath('records.humidity_min.value', 60)
             ->assertJsonPath('first.date', '2026-10-25 11:00:00')
             ->assertJsonPath('last.date', '2026-10-31 11:00:00');
 

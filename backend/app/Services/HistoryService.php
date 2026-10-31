@@ -145,6 +145,7 @@ class HistoryService
                 'pressure_max' => $this->record($rows->sortByDesc('pressure')->first(), 'pressure'),
                 'pressure_min' => $this->record($rows->sortBy('pressure')->first(), 'pressure'),
                 'humidity_max' => $this->record($rows->sortByDesc('humidity')->first(), 'humidity'),
+                'humidity_min' => $this->record($rows->sortBy('humidity')->first(), 'humidity'),
             ],
             'averages' => $rows->isEmpty() ? null : [
                 'temperature' => $this->round($rows->avg('temperature')),
