@@ -110,4 +110,49 @@ class OpenWeatherFixtures
     {
         return ['cod' => (string) $code, 'message' => $message];
     }
+
+    // Składniki jakości powietrza (µg/m³) używane w odpowiedziach /data/2.5/air_pollution
+    public const AIR_COMPONENTS = [
+        'co' => 230.31,
+        'no' => 0.5,
+        'no2' => 12.3,
+        'o3' => 55.1,
+        'so2' => 3.4,
+        'pm2_5' => 18.2,
+        'pm10' => 24.7,
+        'nh3' => 1.2,
+    ];
+
+    // Odpowiedź /data/2.5/air_pollution (aktualna jakość powietrza)
+    public static function airPollution(float $lat = 50.0413, float $lon = 21.999, array $overrides = []): array
+    {
+        return array_replace_recursive([
+            'coord' => ['lon' => $lon, 'lat' => $lat],
+            'list' => [[
+                'main' => ['aqi' => 2],
+                'components' => self::AIR_COMPONENTS,
+                'dt' => 1730383200, // 2024-10-31 14:00:00 UTC
+            ]],
+        ], $overrides);
+    }
+
+    // Odpowiedź /data/2.5/air_pollution/forecast (domyślnie 96 wpisów co godzinę)
+    public static function airPollutionForecast(float $lat = 50.0413, float $lon = 21.999, int $count = 96): array
+    {
+        $start = 1730386800;
+        $list = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            $list[] = [
+                'main' => ['aqi' => 1 + ($i % 5)],
+                'components' => array_replace(self::AIR_COMPONENTS, [
+                    'pm2_5' => 5.0 + $i,
+                    'pm10' => 10.0 + $i,
+                ]),
+                'dt' => $start + $i * 3600,
+            ];
+        }
+
+        return ['coord' => ['lon' => $lon, 'lat' => $lat], 'list' => $list];
+    }
 }
