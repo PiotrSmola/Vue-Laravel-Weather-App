@@ -1,10 +1,12 @@
 <script setup>
 import { ref, reactive } from "vue";
 import { useAuthStore } from "@/stores/auth";
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import { safeRedirect } from '@/utils/redirect';
 
 const authStore = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const formData = reactive({
   email: "",
@@ -21,7 +23,11 @@ const login = async () => {
   try {
     const success = await authStore.login(formData.email, formData.password);
     if (success) {
-      router.push('/');
+      // Powrót na stronę, która wymagała zalogowania (?redirect=)
+      router.push(safeRedirect(route.query.redirect));
+    } else if (authStore.error && !/email|hasło|name/.test(authStore.error)) {
+      // Komunikaty dotyczące pól są wyświetlane przy polach formularza
+      formError.value = authStore.error;
     }
   } catch (error) {
     formError.value = error.message || "Nie udało się zalogować";
@@ -63,6 +69,9 @@ const login = async () => {
           <p v-if="authStore.error && authStore.error.includes('hasło')" class="error-message">
             {{ authStore.error }}
           </p>
+          <router-link :to="{ name: 'forgot-password' }" class="forgot-link">
+            Nie pamiętasz hasła?
+          </router-link>
         </div>
 
         <div v-if="formError" class="form-error">
@@ -180,6 +189,18 @@ input:focus {
   color: #3b82f6;
   font-weight: 500;
   text-decoration: none;
+}
+
+.forgot-link {
+  align-self: flex-end;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
 }
 
 .register-link a:hover {

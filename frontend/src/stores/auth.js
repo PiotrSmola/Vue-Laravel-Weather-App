@@ -1,51 +1,84 @@
 import { defineStore } from "pinia";
+import { api } from "@/api/client";
+import { TOKEN_STORAGE_KEY } from "@/config";
+import { useSettingsStore } from "./settings";
+import { deviceName } from "@/utils/device";
+
+function readToken() {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+// Promise bieżącego pobierania użytkownika (współdzielony, aby /api/user szedł raz)
+let userPromise = null;
 
 export const useAuthStore = defineStore("authStore", {
   state: () => {
     return {
       user: null,
-      token: localStorage.getItem("token") || null,
+      token: readToken(),
+      // true, gdy stan użytkownika został już ustalony (pobrany lub brak tokenu)
+      userLoaded: false,
       loading: false,
       error: null,
+      // Błędy walidacji z backendu przypisane do pól formularza ({ pole: [komunikaty] })
+      fieldErrors: {},
     };
   },
   getters: {
     isAuthenticated: (state) => !!state.token,
   },
   actions: {
-    async initialize() {
-      if (this.token) {
-        await this.getUser();
+    // Pobiera użytkownika tylko raz (cache); kolejne wywołania zwracają zapamiętany stan
+    async ensureUser() {
+      if (this.userLoaded) return this.user;
+      if (!this.token) {
+        this.userLoaded = true;
+        return null;
       }
+      return this.getUser();
     },
-    
+
+    // Zachowane dla kompatybilności
+    async initialize() {
+      return this.ensureUser();
+    },
+
+    setSession(token, user) {
+      this.token = token;
+      try {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } catch {
+        // ignorujemy
+      }
+      return this.setUser(user);
+    },
+
+    setUser(user) {
+      this.user = user;
+      this.userLoaded = true;
+      // Ustawienia konta (z user.settings lub GET /api/user/settings)
+      return user ? useSettingsStore().loadForUser(user) : Promise.resolve();
+    },
+
     async login(email, password) {
       this.loading = true;
       this.error = null;
 
       try {
-        const response = await fetch("/api/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ email, password }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.message || "Nie udało się zalogować");
-        }
-
-        this.token = data.token;
-        localStorage.setItem("token", data.token);
-        this.user = data.user;
-
+        const data = await api.post(
+          "/login",
+          { email, password, device_name: deviceName() },
+          { auth: false }
+        );
+        await this.setSession(data.token, data.user);
         return true;
       } catch (error) {
         console.error("Login error:", error);
-        this.error = error.message;
+        this.error = error.message || "Nie udało się zalogować";
         return false;
       } finally {
         this.loading = false;
@@ -55,60 +88,46 @@ export const useAuthStore = defineStore("authStore", {
     async register(name, email, password, password_confirmation) {
       this.loading = true;
       this.error = null;
+      this.fieldErrors = {};
 
       try {
-        const response = await fetch("/api/register", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ name, email, password, password_confirmation }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          if (data.errors) {
-            const errors = Object.values(data.errors).flat();
-            throw new Error(errors.join("\n"));
-          }
-          throw new Error(data.message || "Nie udało się zarejestrować");
-        }
-
-        this.token = data.token;
-        localStorage.setItem("token", data.token);
-        this.user = data.user;
-
+        const data = await api.post(
+          "/register",
+          { name, email, password, password_confirmation, device_name: deviceName() },
+          { auth: false }
+        );
+        await this.setSession(data.token, data.user);
         return true;
       } catch (error) {
         console.error("Register error:", error);
-        this.error = error.message;
+        this.fieldErrors = error.errors || {};
+        this.error = error.errors
+          ? error.messages.join("\n")
+          : error.message || "Nie udało się zarejestrować";
         return false;
       } finally {
         this.loading = false;
       }
     },
 
+    // Wylogowanie z bieżącego urządzenia
     async logout() {
+      return this._logoutRequest("/logout");
+    },
+
+    // Wylogowanie ze wszystkich urządzeń (unieważnia wszystkie tokeny)
+    async logoutAll() {
+      return this._logoutRequest("/logout-all");
+    },
+
+    async _logoutRequest(path) {
       this.loading = true;
       this.error = null;
 
       try {
         if (this.token) {
-          const response = await fetch("/api/logout", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${this.token}`,
-              "Content-Type": "application/json",
-            },
-          });
-
-          if (!response.ok) {
-            const data = await response.json();
-            console.error("Logout error:", data);
-          }
+          await api.post(path, null, { handleUnauthorized: false });
         }
-
         return true;
       } catch (error) {
         console.error("Logout error:", error);
@@ -120,36 +139,50 @@ export const useAuthStore = defineStore("authStore", {
     },
 
     clearAuth() {
+      const wasLoggedIn = !!this.user || !!this.token;
       this.user = null;
       this.token = null;
-      localStorage.removeItem("token");
+      this.userLoaded = true;
+      userPromise = null;
+      try {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+      } catch {
+        // ignorujemy
+      }
+      if (wasLoggedIn) useSettingsStore().resetToLocal();
     },
 
+    // Wymusza pobranie danych użytkownika z /api/user
     async getUser() {
       if (!this.token) return null;
+      if (userPromise) return userPromise;
 
-      try {
-        const response = await fetch("/api/user", {
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-          },
-        });
-
-        if (!response.ok) {
-          if (response.status === 401) {
+      userPromise = (async () => {
+        try {
+          const data = await api.get("/user", { handleUnauthorized: false });
+          await this.setUser(data);
+          return data;
+        } catch (error) {
+          if (error.status === 401) {
             this.clearAuth();
-            return null;
+          } else {
+            console.error("Get user error:", error);
+            // Nie blokujemy nawigacji przy błędzie sieci – spróbujemy ponownie później
           }
-          throw new Error("Nie udało się pobrać danych użytkownika");
+          return null;
+        } finally {
+          userPromise = null;
         }
+      })();
 
-        const data = await response.json();
-        this.user = data;
-        return data;
-      } catch (error) {
-        console.error("Get user error:", error);
-        return null;
-      }
+      return userPromise;
+    },
+
+    // Aktualizuje wybrane pola zalogowanego użytkownika (np. po edycji profilu
+    // lub weryfikacji e-maila) bez ponownego wczytywania ustawień
+    patchUser(fields) {
+      if (!this.user) return;
+      this.user = { ...this.user, ...fields };
     },
   },
 });

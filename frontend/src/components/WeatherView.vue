@@ -1,8 +1,20 @@
+<script>
+// Stan wspólny dla wszystkich instancji komponentu (do odświeżenia strony)
+const sessionFlags = { autoLocated: false };
+</script>
+
 <script setup>
-import { ref, computed, watch } from 'vue';
+import{ ref, computed, watch, onMounted } from 'vue';
 import { useAuthStore } from "@/stores/auth";
 import { useWeatherStore } from "@/stores/weather";
 import { useRouter } from 'vue-router';
+import { FAVORITES_LIMIT } from '@/config';
+import { useUnits } from '@/composables/useUnits';
+import { useGeolocation } from '@/composables/useGeolocation';
+import { useSettingsStore } from '@/stores/settings';
+import WeatherInsights from '@/components/WeatherInsights.vue';
+
+const { formatTemp, formatWind, formatPressure, formatVisibility } = useUnits();
 
 const props = defineProps({
   selectedCityId: {
@@ -18,8 +30,49 @@ const selectedCityIndex = ref(0);
 const showConfirmModal = ref(false);
 const showRemoveModal = ref(false);
 const maxFavoritesReached = ref(false);
+// Komunikat o limicie – z odpowiedzi backendu, jeśli dostępny
+const favoritesLimitMessage = ref('');
 const isLoading = ref(false);
 const isRemoving = ref(false);
+
+// "Moja lokalizacja"
+const settingsStore = useSettingsStore();
+const { locate, locating, geoError } = useGeolocation();
+const locationError = ref(null);
+// Automatyczna lokalizacja przy starcie (ustawienie lokalne) – raz na sesję
+const autoLocate = settingsStore.use_location_on_start && !sessionFlags.autoLocated;
+const isLocationActive = computed(() =>
+  !!weatherStore.location && weatherStore.currentWeather?.id === weatherStore.location.cityId
+);
+
+const useMyLocation = async () => {
+  locationError.value = null;
+  const coords = await locate();
+  if (!coords) {
+    locationError.value = geoError.value;
+    return;
+  }
+  try {
+    isLoading.value = true;
+    await weatherStore.getWeatherForCoordinates(coords.lat, coords.lon);
+    selectedCityIndex.value = -1;
+  } catch (err) {
+    locationError.value = 'Nie udało się pobrać pogody dla Twojej lokalizacji';
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const toggleLocationOnStart = (event) => {
+  settingsStore.setUseLocationOnStart(event.target.checked);
+};
+
+onMounted(() => {
+  if (autoLocate) {
+    sessionFlags.autoLocated = true;
+    useMyLocation();
+  }
+});
 
 const isCityInFavorites = computed(() => {
   if (!weatherStore.currentWeather || !authStore.user) return false;
@@ -37,7 +90,7 @@ const isDefaultCity = computed(() => {
 
 // Sprawdzanie limitu ulubionych miast
 const hasReachedFavoritesLimit = computed(() => {
-  return weatherStore.userFavorites.length >= 10;
+  return weatherStore.userFavorites.length >= FAVORITES_LIMIT;
 });
 
 const selectCity = async (index) => {
@@ -81,14 +134,14 @@ watch(() => props.selectedCityId, (newCityId) => {
   if (newCityId) {
     console.log('Nowe miasto wybrane:', newCityId);
     getWeatherForSelectedCity(newCityId);
-  } else if (weatherStore.cities.length > 0) {
+  } else if (weatherStore.cities.length > 0 && !autoLocate) {
     selectCity(selectedCityIndex.value);
   }
 }, { immediate: true });
 
 const temperature = computed(() => {
   if (!weatherStore.currentWeather) return null;
-  return Math.round(weatherStore.currentWeather.main.temp);
+  return formatTemp(weatherStore.currentWeather.main.temp);
 });
 
 const cityName = computed(() => {
@@ -99,6 +152,12 @@ const cityName = computed(() => {
     return weatherStore.cities[selectedCityIndex.value].name;
   }
   return "";
+});
+
+// Alias ulubionego miasta (np. "Dom") wyświetlany zamiast nazwy, z nazwą w nawiasie
+const displayCityName = computed(() => {
+  const alias = weatherStore.currentWeather && weatherStore.favoriteAlias(weatherStore.currentWeather.id);
+  return alias ? `${alias} (${cityName.value})` : cityName.value;
 });
 
 const getWeatherIconUrl = (iconCode) => {
@@ -121,8 +180,12 @@ const formatDay = (timestamp) => {
 };
 
 const viewDetails = () => {
+  if (isLocationActive.value) {
+    router.push({ name: 'weather-details', params: { id: weatherStore.currentWeather.id } });
+    return;
+  }
   if (weatherStore.currentWeather) {
-    if (props.selectedCityId && typeof props.selectedCityId === 'object' && props.selectedCityId.name) {
+    if (props.selectedCityId&& typeof props.selectedCityId === 'object' && props.selectedCityId.name) {
       router.push({ 
         name: 'weather-details', 
         params: { 
@@ -165,6 +228,7 @@ const toggleFavorite = async () => {
     showRemoveModal.value = true;
   } else {
     if (hasReachedFavoritesLimit.value) {
+      favoritesLimitMessage.value = '';
       maxFavoritesReached.value = true;
       return;
     }
@@ -174,9 +238,14 @@ const toggleFavorite = async () => {
 
 const confirmAddToFavorites = async () => {
   try {
-    await weatherStore.addCity(weatherStore.currentWeather.id);
+    const added = await weatherStore.addCity(weatherStore.currentWeather.id);
     await weatherStore.getUserFavorites();
     showConfirmModal.value = false;
+    // Backend odrzucił dodanie z powodu limitu – pokazujemy jego komunikat
+    if (!added && weatherStore.error && /limit/i.test(weatherStore.error)) {
+      favoritesLimitMessage.value = weatherStore.error;
+      maxFavoritesReached.value = true;
+    }
   } catch (err) {
     console.error("Błąd podczas dodawania miasta do ulubionych:", err);
   }
@@ -215,22 +284,49 @@ const closeMaxFavoritesModal = () => {
       <p>Ładowanie...</p>
     </div>
     
-    <div v-if="!props.selectedCityId && weatherStore.cities.length > 0" class="city-selector">
-      <button 
-        v-for="(city, index) in weatherStore.cities" 
-        :key="city.id" 
-        @click="selectCity(index)"
-        :class="['city-button', { 'active': index === selectedCityIndex }]"
+    <div class="city-selector">
+      <button
+        type="button"
+        @click="useMyLocation"
+        :disabled="locating"
+        :class="['city-button', 'location-button', { 'active': isLocationActive }]"
+        title="Pokaż pogodę dla Twojej lokalizacji"
       >
-        {{ city.name }}
+        📍 {{ locating ? 'Ustalanie lokalizacji...' : 'Moja lokalizacja' }}
       </button>
+      <template v-if="!props.selectedCityId && weatherStore.cities.length > 0">
+        <button
+          v-for="(city, index) in weatherStore.cities"
+          :key="city.id"
+          @click="selectCity(index)"
+          :class="['city-button', { 'active': index === selectedCityIndex && !isLocationActive }]"
+        >
+          {{ weatherStore.cityLabel(city) }}
+        </button>
+      </template>
+    </div>
+    <div v-if="locationError" class="location-error" role="alert">
+      {{ locationError }}
+      <button type="button" class="location-error-close" @click="locationError = null" aria-label="Zamknij">×</button>
+    </div>
+    <div class="location-on-start">
+      <input
+        id="location-on-start"
+        type="checkbox"
+        :checked="settingsStore.use_location_on_start"
+        @change="toggleLocationOnStart"
+      />
+      <span><label for="location-on-start" class="location-on-start-label">Pokazuj pogodę dla mojej lokalizacji po otwarciu strony</label></span>
     </div>
     
     <div v-if="weatherStore.currentWeather" class="current-weather">
       <div class="weather-card">
         <div class="weather-header">
-          <h2 class="city-name">{{ cityName }}</h2>
-          <p class="date">{{ formatDay(weatherStore.currentWeather.dt) }}</p>
+          <h2 class="city-name">{{ displayCityName }}</h2>
+          <p class="date">
+            {{ formatDay(weatherStore.currentWeather.dt) }}
+            <span v-if="isLocationActive"> · 📍 Twoja lokalizacja</span>
+          </p>
         </div>
         
         <div v-if="authStore.user" class="favorite-action">
@@ -252,7 +348,7 @@ const closeMaxFavoritesModal = () => {
           </div>
           
           <div class="weather-info">
-            <div class="temperature">{{ temperature }}°C</div>
+            <div class="temperature">{{ temperature }}</div>
             <div class="description">{{ weatherStore.currentWeather.weather[0].description }}</div>
           </div>
           
@@ -263,11 +359,11 @@ const closeMaxFavoritesModal = () => {
             </div>
             <div class="detail">
               <span class="detail-label">Wiatr:</span>
-              <span class="detail-value">{{ Math.round(weatherStore.currentWeather.wind.speed * 3.6) }} km/h</span>
+              <span class="detail-value">{{ formatWind(weatherStore.currentWeather.wind.speed) }}</span>
             </div>
             <div class="detail">
               <span class="detail-label">Ciśnienie:</span>
-              <span class="detail-value">{{ weatherStore.currentWeather.main.pressure }} hPa</span>
+              <span class="detail-value">{{ formatPressure(weatherStore.currentWeather.main.pressure) }}</span>
             </div>
           </div>
         </div>
@@ -283,7 +379,7 @@ const closeMaxFavoritesModal = () => {
           </div>
           <div class="detail">
             <span class="detail-label">Widoczność:</span>
-            <span class="detail-value">{{ Math.round(weatherStore.currentWeather.visibility / 1000) }} km</span>
+            <span class="detail-value">{{ formatVisibility(weatherStore.currentWeather.visibility) }}</span>
           </div>
           <div class="detail">
             <span class="detail-label">Chmury:</span>
@@ -299,6 +395,12 @@ const closeMaxFavoritesModal = () => {
       </div>
     </div>
     
+    <WeatherInsights
+      v-if="weatherStore.currentWeather"
+      :current="weatherStore.currentWeather"
+      :forecast="weatherStore.forecast"
+    />
+
     <div v-if="weatherStore.forecast" class="forecast">
       <h3 class="forecast-title">Prognoza 5-dniowa</h3>
       <div class="forecast-container">
@@ -313,7 +415,7 @@ const closeMaxFavoritesModal = () => {
             :alt="day.weather[0].description" 
             class="forecast-icon"
           />
-          <div class="forecast-temp">{{ Math.round(day.main.temp) }}°C</div>
+          <div class="forecast-temp">{{ formatTemp(day.main.temp) }}</div>
           <div class="forecast-desc">{{ day.weather[0].description }}</div>
         </div>
       </div>
@@ -362,7 +464,7 @@ const closeMaxFavoritesModal = () => {
     <div v-if="maxFavoritesReached" class="modal-overlay">
       <div class="confirm-modal">
         <h3 class="modal-title">Limit ulubionych miast</h3>
-        <p class="modal-text">Osiągnięto limit 10 ulubionych miast.</p>
+        <p class="modal-text">{{ favoritesLimitMessage || `Osiągnięto limit ${FAVORITES_LIMIT} ulubionych miast.` }}</p>
         <p class="modal-info">Aby dodać nowe miasto, musisz najpierw usunąć jedno z istniejących ulubionych miast.</p>
         <div class="modal-buttons">
           <button @click="closeMaxFavoritesModal" class="modal-button confirm-button">OK</button>
@@ -437,6 +539,57 @@ const closeMaxFavoritesModal = () => {
 .city-button.active {
   background-color: #3b82f6;
   color: white;
+}
+
+.city-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.location-button:not(.active) {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.location-button:not(.active):hover:not(:disabled) {
+  background-color: #bfdbfe;
+}
+
+.location-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background-color: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.875rem;
+}
+
+.location-error-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.location-on-start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 0;
+}
+
+.location-on-start-label {
+  display: inline;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.25;
+  color: #6b7280;
+  cursor: pointer;
 }
 
 .favorite-action {

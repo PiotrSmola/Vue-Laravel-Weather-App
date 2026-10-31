@@ -2,277 +2,224 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\WeatherApiException;
 use App\Models\City;
-use App\Models\WeatherData;
+use App\Services\WeatherService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 
 class CityController extends Controller
 {
+    public function __construct(protected WeatherService $weather)
+    {
+    }
+
+    /**
+     * Miasta domyślne (config weather.default_cities). Trasa publiczna - jeśli żądanie
+     * zawiera token, pomijane są ulubione miasta TEGO użytkownika.
+     */
     public function index()
     {
-        $userCityIds = DB::table('user_cities')->distinct()->pluck('city_id');
-        
-        $cities = City::whereNotIn('id', $userCityIds)->get();
-        
-        if ($cities->isEmpty()) {
-            $this->loadDefaultCities();
-            
-            $userCityIds = DB::table('user_cities')->distinct()->pluck('city_id');
-            $cities = City::whereNotIn('id', $userCityIds)->get();
+        $cities = $this->weather->ensureCities(config('weather.default_cities', []));
+
+        $user = auth('sanctum')->user();
+
+        if ($user) {
+            $favoriteIds = $user->cities()->pluck('cities.id')->all();
+            $cities = $cities->reject(fn (City $city) => in_array($city->id, $favoriteIds))->values();
         }
-        
+
         return $cities;
     }
 
     public function getUserCities(Request $request)
     {
-        $user = $request->user();
-        $cities = $user->cities;
+        // Kolejność ustawiona przez użytkownika, przy równej pozycji - wg daty dodania
+        $cities = $request->user()->cities()
+            ->with('currentWeather')
+            ->orderBy('user_cities.position')
+            ->orderBy('user_cities.created_at')
+            ->orderBy('user_cities.id')
+            ->get();
 
         $cities->each(function ($city) {
+            $city->alias = $city->pivot->alias;
+            $city->position = (int) $city->pivot->position;
             $city->current_temp = optional($city->currentWeather)->temperature;
             $city->current_condition = optional($city->currentWeather)->weather_condition;
             $city->current_icon = optional($city->currentWeather)->weather_icon;
         });
-        
+
         return $cities;
     }
 
     public function addCity(Request $request)
     {
         $request->validate([
-            'city_id' => 'required|integer'
+            'city_id' => 'required|integer|min:1'
         ]);
-        
-        $cityId = $request->city_id;
+
+        $cityId = (int) $request->city_id;
         $user = $request->user();
-        
-        if ($user->cities()->count() >= 10) {
-            return response()->json(['error' => 'Osiągnięto limit 10 ulubionych miast'], 400);
+        $limit = (int) config('weather.favorites_limit', 10);
+
+        if ($user->cities()->count() >= $limit) {
+            return response()->json(['error' => 'Osiągnięto limit ' . $limit . ' ulubionych miast'], 400);
         }
-        
-        $city = City::where('openweather_id', $cityId)->first();
-        
-        if (!$city) {
-            try {
-                $response = Http::get('https://api.openweathermap.org/data/2.5/weather', [
-                    'id' => $cityId,
-                    'appid' => config('weather.api_key'),
-                    'units' => 'metric'
-                ]);
-                
-                if (!$response->successful()) {
-                    return response()->json(['error' => 'Nie znaleziono miasta'], 404);
-                }
-                
-                $data = $response->json();
-                
-                $city = City::create([
-                    'openweather_id' => $cityId,
-                    'name' => $data['name'],
-                    'country' => $data['sys']['country'],
-                    'latitude' => $data['coord']['lat'],
-                    'longitude' => $data['coord']['lon'],
-                ]);
-            } catch (\Exception $e) {
-                Log::error('Błąd podczas dodawania miasta: ' . $e->getMessage());
-                return response()->json(['error' => 'Wystąpił błąd podczas dodawania miasta'], 500);
+
+        try {
+            $city = $this->weather->findOrCreateCity($cityId);
+        } catch (WeatherApiException $e) {
+            if ($e->isNotFound()) {
+                return response()->json(['error' => 'Nie znaleziono miasta'], 404);
             }
+
+            return response()->json(['error' => 'Wystąpił błąd podczas dodawania miasta'], 502);
         }
-        
+
         if ($user->cities()->where('city_id', $city->id)->exists()) {
             return response()->json(['error' => 'Miasto już jest w ulubionych'], 400);
         }
-        
-        $user->cities()->attach($city->id);
-        
+
+        // Nowe ulubione trafia na koniec listy
+        $position = (int) $user->cities()->max('user_cities.position') + ($user->cities()->exists() ? 1 : 0);
+        $user->cities()->attach($city->id, ['position' => $position]);
+
         return response()->json([
-            'message' => 'Miasto dodane do ulubionych', 
+            'message' => 'Miasto dodane do ulubionych',
             'city' => $city
         ]);
     }
 
-public function removeCity(Request $request, $cityId)
-{
-    $user = $request->user();
-    
-    $city = City::where('openweather_id', $cityId)->first();
-    
-    if (!$city) {
-        return response()->json(['error' => 'Nie znaleziono miasta'], 404);
-    }
-    
-    // Odłącz miasto od użytkownika (usuń z ulubionych)
-    $user->cities()->detach($city->id);
-    
-    // czy miasto jest domyślne - jeśli nie usuń je wraz z danymi historycznymi, tylko jeśli nie jest używane przez innych użytkowników
-    $isDefaultCity = in_array($cityId, config('weather.default_cities'));
-    
-    if (!$isDefaultCity) {
-        $isUsedByOthers = DB::table('user_cities')->where('city_id', $city->id)->exists();
-        
-        if (!$isUsedByOthers) {
-            WeatherData::where('city_id', $city->id)->delete();
-            
-            // Usuń samo miasto
-            $city->delete();
+    // Usuwa miasto z ulubionych. Samo miasto i jego historia pozostają w bazie.
+    public function removeCity(Request $request, int $cityId)
+    {
+        $city = City::where('openweather_id', $cityId)->first();
+
+        if (!$city) {
+            return response()->json(['error' => 'Nie znaleziono miasta'], 404);
         }
+
+        $request->user()->cities()->detach($city->id);
+
+        return response()->json(['message' => 'Miasto usunięte z ulubionych']);
     }
-    
-    return response()->json(['message' => 'Miasto usunięte z ulubionych']);
-}
 
     public function searchCities(Request $request)
     {
-        $query = $request->get('q');
-        
-        if (strlen($query) < 3) {
+        $query = trim((string) $request->get('q'));
+
+        if (mb_strlen($query) < 3) {
             return response()->json(['error' => 'Zapytanie musi zawierać co najmniej 3 znaki'], 400);
         }
-        
+
+        if (mb_strlen($query) > 100) {
+            return response()->json(['error' => 'Zapytanie jest zbyt długie'], 400);
+        }
+
         try {
-            $response = Http::get('https://api.openweathermap.org/geo/1.0/direct', [
-                'q' => $query,
-                'limit' => 5,
-                'appid' => config('weather.api_key')
-            ]);
-            
-            if (!$response->successful()) {
-                return response()->json(['error' => 'Nie udało się wyszukać miast'], 500);
-            }
-            
-            $cities = $response->json();
-            
-            if (empty($cities)) {
-                return response()->json([]);
-            }
-            
-            $formattedCities = collect($cities)->map(function ($city) {
+            return response()->json($this->weather->searchCities($query));
+        } catch (WeatherApiException $e) {
+            return response()->json(['error' => 'Wystąpił błąd podczas wyszukiwania miast'], 502);
+        }
+    }
+
+    /**
+     * Dane historyczne ulubionego miasta. Parametry opcjonalne: from, to (data lub data z godziną, ISO 8601).
+     * Domyślnie ostatnie 7 dni, maksymalny zakres 366 dni.
+     */
+    public function getHistoricalData(Request $request, int $cityId)
+    {
+        $request->validate([
+            'from' => 'nullable|date',
+            'to' => 'nullable|date',
+        ]);
+
+        [$from, $to] = $this->historyRange($request);
+
+        $city = City::where('openweather_id', $cityId)->first();
+
+        if (!$city) {
+            return response()->json(['error' => 'Nie znaleziono miasta'], 404);
+        }
+
+        $isFavorite = $request->user()->cities()->where('city_id', $city->id)->exists();
+
+        if (!$isFavorite) {
+            return response()->json(['error' => 'Brak dostępu do danych historycznych dla tego miasta'], 403);
+        }
+
+        $historicalData = $city->weatherData()
+            ->whereBetween('measured_at', [$from->format('Y-m-d H:i:s'), $to->format('Y-m-d H:i:s')])
+            ->orderBy('measured_at', 'asc')
+            ->get()
+            ->map(function ($data) {
                 return [
-                    'id' => $this->getCityIdFromCoordinates($city['lat'], $city['lon']),
-                    'name' => $city['name'],
-                    'country' => $city['country'],
-                    'state' => $city['state'] ?? null,
-                    'lat' => $city['lat'],
-                    'lon' => $city['lon']
+                    'timestamp' => $data->measured_at->timestamp * 1000, // Dla JavaScript Date
+                    'date' => $data->measured_at->format('Y-m-d H:i:s'),
+                    'temperature' => $data->temperature,
+                    'humidity' => $data->humidity,
+                    'pressure' => $data->pressure,
+                    'wind_speed' => $data->wind_speed,
+                    'weather_condition' => $data->weather_condition,
+                    'weather_icon' => $data->weather_icon,
+                    'feels_like' => $data->feels_like,
+                    'wind_direction' => $data->wind_direction,
+                    'clouds' => $data->clouds,
+                    'visibility' => $data->visibility,
+                    'weather_description' => $data->weather_description,
                 ];
-            })->filter(function ($city) {
-                return $city['id'] !== null;
             });
-            
-            return $formattedCities;
-        } catch (\Exception $e) {
-            Log::error('Błąd podczas wyszukiwania miast: ' . $e->getMessage());
-            return response()->json(['error' => 'Wystąpił błąd podczas wyszukiwania miast'], 500);
-        }
+
+        return response()->json([
+            'city' => [
+                'id' => $city->id,
+                'name' => $city->name,
+                'country' => $city->country
+            ],
+            'data' => $historicalData
+        ]);
     }
 
-    public function getHistoricalData(Request $request, $cityId)
+    /**
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function historyRange(Request $request): array
     {
-        try {
-            $user = $request->user();
-            $city = City::where('openweather_id', $cityId)->first();
-            
-            if (!$city) {
-                return response()->json(['error' => 'Nie znaleziono miasta'], 404);
-            }
-            
-            $isFavorite = $user->cities()->where('city_id', $city->id)->exists();
-            
-            if (!$isFavorite) {
-                return response()->json(['error' => 'Brak dostępu do danych historycznych dla tego miasta'], 403);
-            }
-            
-            $historicalData = $city->weatherData()
-                ->orderBy('measured_at', 'asc')
-                ->get()
-                ->map(function ($data) {
-                    return [
-                        'timestamp' => $data->measured_at->timestamp * 1000, // Dla JavaScript Date
-                        'date' => $data->measured_at->format('Y-m-d H:i:s'),
-                        'temperature' => $data->temperature,
-                        'humidity' => $data->humidity,
-                        'pressure' => $data->pressure,
-                        'wind_speed' => $data->wind_speed,
-                        'weather_condition' => $data->weather_condition,
-                        'weather_icon' => $data->weather_icon
-                    ];
-                });
-            
-            return response()->json([
-                'city' => [
-                    'id' => $city->id,
-                    'name' => $city->name,
-                    'country' => $city->country
-                ],
-                'data' => $historicalData
+        $tz = config('app.timezone');
+        $isDateOnly = fn ($value) => (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $value);
+
+        $to = $request->filled('to')
+            ? Carbon::parse($request->to)->setTimezone($tz)
+            : now($tz);
+
+        if ($request->filled('to') && $isDateOnly($request->to)) {
+            $to = $to->endOfDay();
+        }
+
+        $from = $request->filled('from')
+            ? Carbon::parse($request->from)->setTimezone($tz)
+            : $to->copy()->subDays(config('weather.history_default_days', 7));
+
+        if ($request->filled('from') && $isDateOnly($request->from)) {
+            $from = $from->startOfDay();
+        }
+
+        if ($from->gt($to)) {
+            throw ValidationException::withMessages([
+                'from' => ['Data początkowa musi być wcześniejsza niż data końcowa.'],
             ]);
-        } catch (\Exception $e) {
-            Log::error('Błąd podczas pobierania danych historycznych: ' . $e->getMessage());
-            return response()->json(['error' => 'Wystąpił błąd podczas pobierania danych historycznych'], 500);
         }
-    }
 
-    private function getCityIdFromCoordinates($lat, $lon)
-    {
-        try {
-            $response = Http::get('https://api.openweathermap.org/data/2.5/weather', [
-                'lat' => $lat,
-                'lon' => $lon,
-                'appid' => config('weather.api_key')
+        $maxDays = (int) config('weather.history_max_days', 366);
+
+        if ($from->diffInDays($to) > $maxDays) {
+            throw ValidationException::withMessages([
+                'from' => ['Maksymalny zakres danych historycznych to ' . $maxDays . ' dni.'],
             ]);
-            
-            if ($response->successful()) {
-                $data = $response->json();
-                return $data['id'] ?? null;
-            }
-        } catch (\Exception $e) {
-            Log::error('Błąd podczas pobierania ID miasta: ' . $e->getMessage());
         }
-        
-        return null;
-    }
 
-    private function loadDefaultCities()
-    {
-        $defaultCities = config('weather.default_cities');
-        
-        foreach ($defaultCities as $cityId) {
-            if (City::where('openweather_id', $cityId)->exists()) {
-                continue;
-            }
-
-            try {
-                $response = Http::get('https://api.openweathermap.org/data/2.5/weather', [
-                    'id' => $cityId,
-                    'appid' => config('weather.api_key'),
-                    'units' => 'metric'
-                ]);
-                
-                if ($response->successful()) {
-                    $data = $response->json();
-
-                    City::create([
-                        'openweather_id' => $cityId,
-                        'name' => $data['name'],
-                        'country' => $data['sys']['country'],
-                        'latitude' => $data['coord']['lat'],
-                        'longitude' => $data['coord']['lon'],
-                    ]);
-                    
-                    Log::info('Dodano domyślne miasto: ' . $data['name']);
-                } else {
-                    Log::error('Nie udało się dodać domyślnego miasta o ID: ' . $cityId);
-                }
-            } catch (\Exception $e) {
-                Log::error('Błąd podczas dodawania domyślnego miasta: ' . $e->getMessage());
-            }
-
-            sleep(1);
-        }
+        return [$from, $to];
     }
 }

@@ -54,6 +54,9 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // Adres(y) frontendu - pierwszy jest używany w linkach w mailach (App\Support\FrontendUrl)
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone
@@ -78,7 +81,7 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    'locale' => env('APP_LOCALE', 'pl'),
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 

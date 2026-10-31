@@ -3,12 +3,13 @@
     "type": "project",
     "description": "The skeleton application for the Laravel framework.",
     "keywords": ["laravel", "framework"],
-    "license": "MIT",
+    "license": "GPL-3.0-only",
     "require": {
         "php": "^8.2",
         "laravel/framework": "^11.9",
         "laravel/sanctum": "^4.1",
-        "laravel/tinker": "^2.9"
+        "laravel/tinker": "^2.9",
+        "minishlink/web-push": "^9.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

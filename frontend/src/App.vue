@@ -1,10 +1,29 @@
 <script setup>
-import { RouterLink, RouterView } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
-import { ref } from "vue";
+import { ref, computed } from "vue";
+import { visibleNavigation } from "./navigation";
+import EmailVerificationBanner from "./components/EmailVerificationBanner.vue";
+import OfflineBanner from "./components/OfflineBanner.vue";
+import AlertsBell from "./components/alerts/AlertsBell.vue";
 
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
+
+// Pozycje menu z rejestru src/navigation/*.js
+const navItems = computed(() => visibleNavigation(!!authStore.user));
+const desktopNavItems = computed(() => navItems.value.filter((item) => item.desktop !== false));
+
+const route = useRoute();
+const router = useRouter();
+
+// Po wylogowaniu opuszczamy strony wymagające logowania
+const handleLogout = async () => {
+  await authStore.logout();
+  if (route.matched.some((record) => record.meta.requiresAuth)) {
+    router.push({ name: "home" });
+  }
+};
 
 const toggleMobileMenu = () => {
   mobileMenuOpen.value = !mobileMenuOpen.value;
@@ -25,6 +44,8 @@ const closeMobileMenu = () => {
               <span class="logo-icon">☁️</span>
               <span class="logo-text">Poland&World Weather</span>
             </RouterLink>
+
+            <AlertsBell mobile />
             
             <button 
               class="mobile-menu-btn" 
@@ -56,16 +77,22 @@ const closeMobileMenu = () => {
           </div>
           
           <div class="nav-links">
-            <RouterLink :to="{ name: 'home' }" class="nav-link">
-              Strona główna
+            <RouterLink
+              v-for="item in desktopNavItems"
+              :key="item.key"
+              :to="item.to"
+              class="nav-link"
+            >
+              {{ item.label }}
             </RouterLink>
             
             <div v-if="authStore.user" class="user-nav">
-              <span class="user-greeting">
+              <AlertsBell />
+              <RouterLink :to="{ name: 'account' }" class="user-greeting">
                 Witaj, {{ authStore.user.name }}
-              </span>
+              </RouterLink>
               
-              <form @submit.prevent="authStore.logout">
+              <form @submit.prevent="handleLogout">
                 <button class="logout-btn">Wyloguj</button>
               </form>
             </div>
@@ -88,20 +115,22 @@ const closeMobileMenu = () => {
           @click.self="closeMobileMenu"
         >
           <div class="mobile-nav-links">
-            <RouterLink 
-              :to="{ name: 'home' }" 
+            <RouterLink
+              v-for="item in navItems"
+              :key="item.key"
+              :to="item.to"
               class="mobile-nav-link"
               @click="closeMobileMenu"
             >
-              Home
+              {{ item.label }}
             </RouterLink>
             
             <div v-if="authStore.user" class="mobile-user-nav">
-              <span class="mobile-user-greeting">
-                Hello, {{ authStore.user.name }}
-              </span>
+              <RouterLink :to="{ name: 'account' }" class="mobile-user-greeting" @click="closeMobileMenu">
+                Witaj, {{ authStore.user.name }}
+              </RouterLink>
               
-              <form @submit.prevent="authStore.logout">
+              <form @submit.prevent="handleLogout">
                 <button class="mobile-logout-btn" @click="closeMobileMenu">
                   Logout
                 </button>
@@ -129,6 +158,9 @@ const closeMobileMenu = () => {
         </div>
       </nav>
     </header>
+    <OfflineBanner />
+
+    <EmailVerificationBanner />
 
     <RouterView />
     
@@ -158,15 +190,15 @@ const closeMobileMenu = () => {
 }
 
 .main-nav {
-  @apply relative;
+  @apply relative 2xl:max-w-none;
 }
 
 .nav-container {
-  @apply container mx-auto px-2 py-2 flex items-center justify-between;
+  @apply container mx-auto px-2 py-2 flex items-center justify-between gap-8;
 }
 
 .logo-container {
-  @apply flex items-center justify-between w-full md:w-auto;
+  @apply flex items-center justify-between w-full 2xl:w-auto;
 }
 
 .logo {
@@ -178,11 +210,11 @@ const closeMobileMenu = () => {
 }
 
 .logo-text {
-  @apply text-2xl font-bold ;
+  @apply text-2xl font-bold whitespace-nowrap;
 }
 
 .mobile-menu-btn {
-  @apply md:hidden text-white p-2;
+  @apply 2xl:hidden text-white p-2;
 }
 
 .icon {
@@ -190,11 +222,11 @@ const closeMobileMenu = () => {
 }
 
 .nav-links {
-  @apply hidden md:flex items-center space-x-8;
+  @apply hidden 2xl:flex items-center space-x-2;
 }
 
 .nav-link {
-  @apply text-white opacity-80 hover:opacity-100 text-lg py-2;
+  @apply text-white opacity-80 hover:opacity-100 text-lg py-2 whitespace-nowrap;
 }
 
 .user-nav {
@@ -202,7 +234,7 @@ const closeMobileMenu = () => {
 }
 
 .user-greeting {
-  @apply text-white opacity-80;
+  @apply text-white opacity-80 hover:opacity-100 whitespace-nowrap truncate max-w-[10rem];
 }
 
 .logout-btn {
@@ -222,7 +254,7 @@ const closeMobileMenu = () => {
 }
 
 .mobile-nav {
-  @apply fixed inset-0 bg-blue-900 bg-opacity-95 z-50 flex items-center justify-center md:hidden;
+  @apply fixed inset-0 bg-blue-900 bg-opacity-95 z-50 flex items-center justify-center 2xl:hidden;
 }
 
 .mobile-nav-links {

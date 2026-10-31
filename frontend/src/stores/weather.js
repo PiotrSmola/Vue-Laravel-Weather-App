@@ -1,5 +1,12 @@
 import { defineStore } from "pinia";
+import { api } from "@/api/client";
 import { useAuthStore } from "./auth";
+import { useSettingsStore } from "./settings";
+
+// Parametry wspólne dla wszystkich zapytań /api/weather/... (język opisów pogody)
+export function weatherParams(extra = {}) {
+  return { lang: useSettingsStore().lang, ...extra };
+}
 
 export const useWeatherStore = defineStore("weatherStore", {
   state: () => {
@@ -23,26 +30,62 @@ export const useWeatherStore = defineStore("weatherStore", {
       historicalData: null,
       loading: false,
       error: null,
+      // Pogoda dla "Moja lokalizacja": { lat, lon, cityId, name } lub null
+      location: null,
     };
   },
+  getters: {
+    // Miasto domowe z ustawień – home_city_id to ID miasta w OpenWeather (openweather_id)
+    homeCity(state) {
+      const homeId = useSettingsStore().home_city_id;
+      if (!homeId || !useAuthStore().user) return null;
+      return (
+        state.userFavorites.find((c) => c.openweather_id === homeId) || null
+      );
+    },
+
+    // Własna nazwa ulubionego miasta (alias) po ID OpenWeather, np. "Dom" – lub null
+    favoriteAlias(state) {
+      return (openweatherId) =>
+        state.userFavorites.find((c) => c.openweather_id === Number(openweatherId))?.alias || null;
+    },
+
+    // Nazwa do wyświetlania: alias (jeśli ustawiony) lub nazwa miasta
+    cityLabel() {
+      return (city) => {
+        if (!city) return "";
+        const id = city.openweather_id ?? city.id;
+        return this.favoriteAlias(id) || city.name || "";
+      };
+    },
+  },
   actions: {
+    // Ustawia miasto domowe na początku listy miast (przyciski wyboru miasta)
+    withHomeCityFirst(list) {
+      const home = this.homeCity;
+      if (!home) return list;
+      const rest = list.filter((c) => c.openweather_id !== home.openweather_id);
+      return [home, ...rest];
+    },
+
+    // Przelicza kolejność listy miast po zmianie miasta domowego (lub wylogowaniu)
+    applyHomeCity() {
+      const order = this.defaultCities.map((c) => c.openweather_id);
+      const defaults = this.cities
+        .filter((c) => order.includes(c.openweather_id))
+        .sort(
+          (a, b) =>
+            order.indexOf(a.openweather_id) - order.indexOf(b.openweather_id)
+        );
+      this.cities = this.withHomeCityFirst(defaults);
+    },
+
     async getFeaturedCities() {
       this.loading = true;
       this.error = null;
 
       try {
-        const response = await fetch("/api/cities");
-
-        if (!response.ok) {
-          console.error(
-            "Błąd pobierania miast:",
-            response.status,
-            response.statusText
-          );
-          throw new Error("Nie udało się pobrać listy miast");
-        }
-
-        const cities = await response.json();
+        const cities = await api.get("/cities");
 
         const defaultCityIds = this.defaultCities.map(
           (city) => city.openweather_id
@@ -61,12 +104,15 @@ export const useWeatherStore = defineStore("weatherStore", {
             )
         );
 
-        this.cities = [...filteredCities, ...missingDefaultCities];
+        this.cities = this.withHomeCityFirst([
+          ...filteredCities,
+          ...missingDefaultCities,
+        ]);
       } catch (error) {
         console.error("Błąd:", error);
         this.error = "Nie udało się pobrać listy miast";
 
-        this.cities = [...this.defaultCities];
+        this.cities = this.withHomeCityFirst([...this.defaultCities]);
       } finally {
         this.loading = false;
       }
@@ -96,45 +142,37 @@ export const useWeatherStore = defineStore("weatherStore", {
           );
         }
 
-        if (!foundCity) {
+        // Dowolne poprawne ID OpenWeather (np. z mapy lub lokalizacji) jest obsługiwane przez API;
+        // miasto domyślne tylko przy nieprawidłowym ID
+        if (!foundCity && !(Number(cityId) > 0)) {
           console.warn(
-            `Nie znaleziono miasta o ID ${cityId}, używam domyślnego`
+            `Nieprawidłowe ID miasta ${cityId}, używam domyślnego`
           );
           foundCity = this.defaultCities[0];
           cityId = foundCity.openweather_id;
         }
 
-        const [weatherResponse, forecastResponse] = await Promise.all([
-          fetch(`/api/weather/${cityId}`),
-          fetch(`/api/weather/forecast/${cityId}`),
-        ]);
-
-        // Sprawdzanie odpowiedzi API
-        if (!weatherResponse.ok) {
-          console.error(
-            `Nie udało się pobrać aktualnej pogody. Status: ${weatherResponse.status}`
-          );
-          const errorText = await weatherResponse.text();
-          console.error(`Treść błędu: ${errorText}`);
-          throw new Error("Nie udało się pobrać aktualnej pogody");
-        }
-
-        if (!forecastResponse.ok) {
-          console.error(
-            `Nie udało się pobrać prognozy. Status: ${forecastResponse.status}`
-          );
-          const errorText = await forecastResponse.text();
-          console.error(`Treść błędu: ${errorText}`);
-          throw new Error("Nie udało się pobrać prognozy pogody");
-        }
-
+        const params = weatherParams();
         const [weatherData, forecastData] = await Promise.all([
-          weatherResponse.json(),
-          forecastResponse.json(),
+          api.get(`/weather/${cityId}`, { params }).catch((error) => {
+            console.error(
+              `Nie udało się pobrać aktualnej pogody. Status: ${error.status}`,
+              error.data
+            );
+            throw new Error("Nie udało się pobrać aktualnej pogody");
+          }),
+          api.get(`/weather/forecast/${cityId}`, { params }).catch((error) => {
+            console.error(
+              `Nie udało się pobrać prognozy. Status: ${error.status}`,
+              error.data
+            );
+            throw new Error("Nie udało się pobrać prognozy pogody");
+          }),
         ]);
 
         this.currentWeather = weatherData;
         this.forecast = forecastData;
+        this.location = null;
       } catch (error) {
         console.error("Błąd:", error);
         this.error = "Nie udało się pobrać danych pogodowych";
@@ -154,8 +192,6 @@ export const useWeatherStore = defineStore("weatherStore", {
         if (countryCode) {
           query += `,${countryCode}`;
         }
-
-        console.log(`Pobieranie pogody dla miasta: ${query}`);
 
         const searchResults = await this.searchCities(query);
 
@@ -187,30 +223,16 @@ export const useWeatherStore = defineStore("weatherStore", {
     },
 
     async getUserFavorites() {
-      if (!localStorage.getItem("token")) {
+      if (!useAuthStore().token) {
         this.userFavorites = [];
         return [];
       }
 
       try {
-        const response = await fetch("/api/cities/user", {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        });
-
-        if (!response.ok) {
-          // Jeśli token wygasł, usuń go
-          if (response.status === 401) {
-            const authStore = useAuthStore();
-            authStore.clearAuth();
-          }
-          throw new Error("Nie udało się pobrać ulubionych miast");
-        }
-
-        const favorites = await response.json();
-        this.userFavorites = favorites;
-        return favorites;
+        // Wygasły token (401) obsługuje globalny handler klienta API
+        const favorites = await api.get("/cities/user");
+        this.userFavorites = Array.isArray(favorites) ? favorites : [];
+        return this.userFavorites;
       } catch (error) {
         console.error("Błąd:", error);
         this.error = "Nie udało się pobrać ulubionych miast";
@@ -220,24 +242,12 @@ export const useWeatherStore = defineStore("weatherStore", {
     },
 
     async addCity(cityId) {
-      if (!localStorage.getItem("token")) {
+      if (!useAuthStore().token) {
         throw new Error("Wymagane zalogowanie");
       }
 
       try {
-        const response = await fetch("/api/cities", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ city_id: cityId }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Nie udało się dodać miasta");
-        }
+        await api.post("/cities", { city_id: cityId });
 
         await this.getUserFavorites();
         await this.getFeaturedCities();
@@ -245,28 +255,18 @@ export const useWeatherStore = defineStore("weatherStore", {
         return true;
       } catch (error) {
         console.error("Błąd:", error);
-        this.error = error.message;
+        this.error = error.message || "Nie udało się dodać miasta";
         return false;
       }
     },
 
     async removeCity(cityId) {
-      if (!localStorage.getItem("token")) {
+      if (!useAuthStore().token) {
         throw new Error("Wymagane zalogowanie");
       }
 
       try {
-        const response = await fetch(`/api/cities/${cityId}`, {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Nie udało się usunąć miasta");
-        }
+        await api.delete(`/cities/${cityId}`);
 
         // Po usunięciu miasta z ulubionych aktualizowanie list
         await this.getUserFavorites();
@@ -296,7 +296,7 @@ export const useWeatherStore = defineStore("weatherStore", {
         return true;
       } catch (error) {
         console.error("Błąd:", error);
-        this.error = error.message;
+        this.error = error.message || "Nie udało się usunąć miasta";
         return false;
       }
     },
@@ -306,33 +306,30 @@ export const useWeatherStore = defineStore("weatherStore", {
         return [];
       }
 
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 sekundowy timeout
-
-        const response = await fetch(
-          `/api/cities/search?q=${encodeURIComponent(query)}`,
-          {
-            signal: controller.signal,
-          }
+      const localFallback = () =>
+        this.defaultCities.filter((city) =>
+          city.name.toLowerCase().includes(query.toLowerCase())
         );
 
-        clearTimeout(timeoutId);
+      try {
+        let results;
+        try {
+          results = await api.get("/cities/search", {
+            params: { q: query },
+            timeout: 2000, // 2 sekundowy timeout
+          });
+        } catch (error) {
+          if (error.name !== "ApiError") throw error;
 
-        if (!response.ok) {
+          // Błąd odpowiedzi serwera – podpowiedzi z listy domyślnych miast
           if (query.toLowerCase().includes("warszawa")) {
             return [this.defaultCities[0]];
           }
           if (query.toLowerCase().includes("kraków")) {
             return [this.defaultCities[1]];
           }
-
-          return this.defaultCities.filter((city) =>
-            city.name.toLowerCase().includes(query.toLowerCase())
-          );
+          return localFallback();
         }
-
-        const results = await response.json();
 
         if (!Array.isArray(results)) {
           console.warn("Niepoprawny format danych z wyszukiwania:", results);
@@ -349,14 +346,12 @@ export const useWeatherStore = defineStore("weatherStore", {
           this.error = "Nie udało się wyszukać miast";
         }
 
-        return this.defaultCities.filter((city) =>
-          city.name.toLowerCase().includes(query.toLowerCase())
-        );
+        return localFallback();
       }
     },
 
     async getHistoricalData(cityId) {
-      if (!localStorage.getItem("token")) {
+      if (!useAuthStore().token) {
         throw new Error("Wymagane zalogowanie");
       }
 
@@ -364,36 +359,81 @@ export const useWeatherStore = defineStore("weatherStore", {
       this.error = null;
 
       try {
-        const response = await fetch(`/api/cities/${cityId}/historical`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        });
-
-        if (!response.ok) {
-          if (response.status === 401) {
-            const authStore = useAuthStore();
-            authStore.clearAuth();
-            throw new Error("Sesja wygasła, zaloguj się ponownie");
-          }
-
-          const errorData = await response.json();
-          throw new Error(
-            errorData.error || "Nie udało się pobrać danych historycznych"
-          );
-        }
-
-        const result = await response.json();
+        const result = await api.get(`/cities/${cityId}/historical`);
         this.historicalData = result;
         return result;
       } catch (error) {
         console.error("Błąd:", error);
-        this.error = error.message;
+        this.error =
+          error.status === 401
+            ? "Sesja wygasła, zaloguj się ponownie"
+            : error.message || "Nie udało się pobrać danych historycznych";
         this.historicalData = null;
         return null;
       } finally {
         this.loading = false;
       }
+    },
+
+    // Aktualna pogoda i prognoza dla współrzędnych (np. "Moja lokalizacja").
+    // Odpowiedź zawiera ID OpenWeather najbliższego miasta – działa z /weather/:id i ulubionymi.
+    async getWeatherForCoordinates(lat, lon) {
+      this.loading = true;
+      this.error = null;
+
+      try {
+        const params = weatherParams({ lat, lon });
+        const [weatherData, forecastData] = await Promise.all([
+          api.get("/weather/coordinates", { params }),
+          api.get("/weather/forecast/coordinates", { params }),
+        ]);
+
+        this.currentWeather = weatherData;
+        this.forecast = forecastData;
+        this.location = {
+          lat,
+          lon,
+          cityId: weatherData?.id || null,
+          name: weatherData?.name || "",
+        };
+        return weatherData;
+      } catch (error) {
+        console.error("Błąd:", error);
+        this.error = "Nie udało się pobrać pogody dla Twojej lokalizacji";
+        throw error;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    // Zmiana kolejności ulubionych (lista ID OpenWeather). Optymistycznie – przy błędzie przywraca.
+    async reorderFavorites(openweatherIds) {
+      const previous = [...this.userFavorites];
+      const byId = new Map(previous.map((c) => [c.openweather_id, c]));
+      const reordered = openweatherIds.map((id) => byId.get(id)).filter(Boolean);
+      if (reordered.length !== previous.length) return false;
+
+      this.userFavorites = reordered.map((c, position) => ({ ...c, position }));
+
+      try {
+        await api.put("/cities/user/order", { order: openweatherIds });
+        return true;
+      } catch (error) {
+        console.error("Błąd:", error);
+        this.error = error.message || "Nie udało się zapisać kolejności";
+        this.userFavorites = previous;
+        return false;
+      }
+    },
+
+    // Własna nazwa ulubionego miasta; pusty tekst usuwa alias
+    async setFavoriteAlias(openweatherId, alias) {
+      const value = (alias || "").trim() || null;
+      const data = await api.patch(`/cities/user/${openweatherId}`, { alias: value });
+      this.userFavorites = this.userFavorites.map((c) =>
+        c.openweather_id === openweatherId ? { ...c, alias: data?.alias ?? value } : c
+      );
+      return true;
     },
 
     generateCityId(lat, lon) {

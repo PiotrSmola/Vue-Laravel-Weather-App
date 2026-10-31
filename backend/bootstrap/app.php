@@ -1,9 +1,10 @@
 <?php
 
+use App\Exceptions\WeatherApiException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use App\Http\Middleware\Cors;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,14 +14,24 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->alias([
-            'cors' => Cors::class,
-        ]);
-        
-        $middleware->group('api', [
-            'cors',
-        ]);
+        // CORS obsługuje wbudowany HandleCors (konfiguracja: config/cors.php)
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Błędy API OpenWeatherMap: szczegóły są w logach, klient dostaje ogólny komunikat
+        $exceptions->dontReport(WeatherApiException::class);
+
+        $exceptions->render(function (WeatherApiException $e, Request $request) {
+            // Wyczerpany limit zapytań (nasz licznik lub HTTP 429 z API)
+            if ($e->status === 429) {
+                return response()->json([
+                    'error' => 'Przekroczono limit zapytań do serwisu pogodowego. Spróbuj za chwilę.',
+                ], 503);
+            }
+
+            if ($e->isNotFound()) {
+                return response()->json(['error' => 'Nie znaleziono miasta'], 404);
+            }
+
+            return response()->json(['error' => 'Nie udało się pobrać danych pogodowych'], 502);
+        });
     })->create();

@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Notifications\ResetPasswordNotification;
+use App\Notifications\VerifyEmailNotification;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasFactory, Notifiable, HasApiTokens;
 
@@ -16,6 +19,10 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'units',
+        'wind_unit',
+        'lang',
+        'home_city_id',
     ];
 
     protected $hidden = [
@@ -23,21 +30,49 @@ class User extends Authenticatable
         'remember_token',
     ];
 
+    // Domyślne ustawienia (takie same jak w migracji)
+    protected $attributes = [
+        'units' => 'metric',
+        'wind_unit' => 'kmh',
+        'lang' => 'pl',
+    ];
+
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'home_city_id' => 'integer',
         ];
     }
 
-    public function posts()
-    {
-        return $this->hasMany(Post::class);
-    }
-    
     public function cities()
     {
-        return $this->belongsToMany(City::class, 'user_cities');
+        // position - kolejność na liście ulubionych, alias - własna nazwa (np. "Dom")
+        return $this->belongsToMany(City::class, 'user_cities')
+            ->withPivot(['position', 'alias'])
+            ->withTimestamps();
+    }
+
+    // Ustawienia w formacie kontraktu API: {units, wind_unit, lang, home_city_id}
+    protected function settings(): Attribute
+    {
+        return Attribute::get(fn () => [
+            'units' => $this->units ?? 'metric',
+            'wind_unit' => $this->wind_unit ?? 'kmh',
+            'lang' => $this->lang ?? 'pl',
+            'home_city_id' => $this->home_city_id,
+        ]);
+    }
+
+    // Maile konta z linkami do frontendu (wysyłane przez kolejkę)
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->notify(new VerifyEmailNotification);
+    }
+
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new ResetPasswordNotification($token));
     }
 }
