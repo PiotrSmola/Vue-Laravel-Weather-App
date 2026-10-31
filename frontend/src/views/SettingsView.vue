@@ -101,7 +101,7 @@ const save = async () => {
           >
             <option :value="null">Brak (domyślna lista miast)</option>
             <option v-for="city in favorites" :key="city.id" :value="city.openweather_id">
-              {{ city.name }}{{ city.country ? `, ${city.country}` : "" }}
+              {{ city.alias ? `${city.alias} – ` : "" }}{{ city.name }}{{ city.country ? `, ${city.country}` : "" }}
             </option>
           </select>
           <p class="ui-hint">

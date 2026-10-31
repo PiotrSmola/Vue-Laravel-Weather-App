@@ -21,6 +21,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->dontReport(WeatherApiException::class);
 
         $exceptions->render(function (WeatherApiException $e, Request $request) {
+            // Wyczerpany limit zapytań (nasz licznik lub HTTP 429 z API)
+            if ($e->status === 429) {
+                return response()->json([
+                    'error' => 'Przekroczono limit zapytań do serwisu pogodowego. Spróbuj za chwilę.',
+                ], 503);
+            }
+
             if ($e->isNotFound()) {
                 return response()->json(['error' => 'Nie znaleziono miasta'], 404);
             }

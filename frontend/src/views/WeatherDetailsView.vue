@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useWeatherStore } from "@/stores/weather";
 import WeatherDetails from '@/components/WeatherDetails.vue';
 import AirQualityPanel from '@/components/air/AirQualityPanel.vue';
+import WeatherInsights from '@/components/WeatherInsights.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -71,6 +72,10 @@ const handleBack = () => {
         :currentWeather="weatherStore.currentWeather"
         :forecast="weatherStore.forecast"
       />
+      <!-- Podpowiedzi i (opcjonalnie) One Call 3.0 -->
+      <div class="weather-insights-wrapper">
+        <WeatherInsights :current="weatherStore.currentWeather" :forecast="weatherStore.forecast" />
+      </div>
       <AirQualityPanel :cityId="weatherStore.currentWeather.id" />
     </div>
     
@@ -131,5 +136,17 @@ const handleBack = () => {
 
 .weather-details-container {
   width: 100%;
+}
+
+.weather-insights-wrapper {
+  max-width: 1000px;
+  margin: 0 auto 1rem;
+  padding: 0 1rem;
+}
+
+.weather-insights-wrapper > * {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 </style>

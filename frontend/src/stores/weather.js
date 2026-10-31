@@ -30,6 +30,8 @@ export const useWeatherStore = defineStore("weatherStore", {
       historicalData: null,
       loading: false,
       error: null,
+      // Pogoda dla "Moja lokalizacja": { lat, lon, cityId, name } lub null
+      location: null,
     };
   },
   getters: {
@@ -40,6 +42,21 @@ export const useWeatherStore = defineStore("weatherStore", {
       return (
         state.userFavorites.find((c) => c.openweather_id === homeId) || null
       );
+    },
+
+    // Własna nazwa ulubionego miasta (alias) po ID OpenWeather, np. "Dom" – lub null
+    favoriteAlias(state) {
+      return (openweatherId) =>
+        state.userFavorites.find((c) => c.openweather_id === Number(openweatherId))?.alias || null;
+    },
+
+    // Nazwa do wyświetlania: alias (jeśli ustawiony) lub nazwa miasta
+    cityLabel() {
+      return (city) => {
+        if (!city) return "";
+        const id = city.openweather_id ?? city.id;
+        return this.favoriteAlias(id) || city.name || "";
+      };
     },
   },
   actions: {
@@ -125,9 +142,11 @@ export const useWeatherStore = defineStore("weatherStore", {
           );
         }
 
-        if (!foundCity) {
+        // Dowolne poprawne ID OpenWeather (np. z mapy lub lokalizacji) jest obsługiwane przez API;
+        // miasto domyślne tylko przy nieprawidłowym ID
+        if (!foundCity && !(Number(cityId) > 0)) {
           console.warn(
-            `Nie znaleziono miasta o ID ${cityId}, używam domyślnego`
+            `Nieprawidłowe ID miasta ${cityId}, używam domyślnego`
           );
           foundCity = this.defaultCities[0];
           cityId = foundCity.openweather_id;
@@ -153,6 +172,7 @@ export const useWeatherStore = defineStore("weatherStore", {
 
         this.currentWeather = weatherData;
         this.forecast = forecastData;
+        this.location = null;
       } catch (error) {
         console.error("Błąd:", error);
         this.error = "Nie udało się pobrać danych pogodowych";
@@ -353,6 +373,67 @@ export const useWeatherStore = defineStore("weatherStore", {
       } finally {
         this.loading = false;
       }
+    },
+
+    // Aktualna pogoda i prognoza dla współrzędnych (np. "Moja lokalizacja").
+    // Odpowiedź zawiera ID OpenWeather najbliższego miasta – działa z /weather/:id i ulubionymi.
+    async getWeatherForCoordinates(lat, lon) {
+      this.loading = true;
+      this.error = null;
+
+      try {
+        const params = weatherParams({ lat, lon });
+        const [weatherData, forecastData] = await Promise.all([
+          api.get("/weather/coordinates", { params }),
+          api.get("/weather/forecast/coordinates", { params }),
+        ]);
+
+        this.currentWeather = weatherData;
+        this.forecast = forecastData;
+        this.location = {
+          lat,
+          lon,
+          cityId: weatherData?.id || null,
+          name: weatherData?.name || "",
+        };
+        return weatherData;
+      } catch (error) {
+        console.error("Błąd:", error);
+        this.error = "Nie udało się pobrać pogody dla Twojej lokalizacji";
+        throw error;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    // Zmiana kolejności ulubionych (lista ID OpenWeather). Optymistycznie – przy błędzie przywraca.
+    async reorderFavorites(openweatherIds) {
+      const previous = [...this.userFavorites];
+      const byId = new Map(previous.map((c) => [c.openweather_id, c]));
+      const reordered = openweatherIds.map((id) => byId.get(id)).filter(Boolean);
+      if (reordered.length !== previous.length) return false;
+
+      this.userFavorites = reordered.map((c, position) => ({ ...c, position }));
+
+      try {
+        await api.put("/cities/user/order", { order: openweatherIds });
+        return true;
+      } catch (error) {
+        console.error("Błąd:", error);
+        this.error = error.message || "Nie udało się zapisać kolejności";
+        this.userFavorites = previous;
+        return false;
+      }
+    },
+
+    // Własna nazwa ulubionego miasta; pusty tekst usuwa alias
+    async setFavoriteAlias(openweatherId, alias) {
+      const value = (alias || "").trim() || null;
+      const data = await api.patch(`/cities/user/${openweatherId}`, { alias: value });
+      this.userFavorites = this.userFavorites.map((c) =>
+        c.openweather_id === openweatherId ? { ...c, alias: data?.alias ?? value } : c
+      );
+      return true;
     },
 
     generateCityId(lat, lon) {

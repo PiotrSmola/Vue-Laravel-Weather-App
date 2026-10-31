@@ -48,7 +48,10 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function cities()
     {
-        return $this->belongsToMany(City::class, 'user_cities')->withTimestamps();
+        // position - kolejność na liście ulubionych, alias - własna nazwa (np. "Dom")
+        return $this->belongsToMany(City::class, 'user_cities')
+            ->withPivot(['position', 'alias'])
+            ->withTimestamps();
     }
 
     // Ustawienia w formacie kontraktu API: {units, wind_unit, lang, home_city_id}

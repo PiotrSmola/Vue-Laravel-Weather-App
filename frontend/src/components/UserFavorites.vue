@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from "@/stores/auth";
 import { useWeatherStore } from "@/stores/weather";
 import { useRouter } from 'vue-router';
@@ -99,6 +99,85 @@ const closeLimitWarning = () => {
   showLimitWarning.value = false;
 };
 
+// --- Kolejność: przeciąganie (mysz) oraz przyciski w górę / w dół (dotyk, klawiatura) ---
+const dragIndex = ref(null);
+const overIndex = ref(null);
+const reordering = ref(false);
+const actionError = ref(null);
+
+const moveFavorite = async (from, to) => {
+  const list = weatherStore.userFavorites;
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
+
+  const ids = list.map((c) => c.openweather_id);
+  const [moved] = ids.splice(from, 1);
+  ids.splice(to, 0, moved);
+
+  reordering.value = true;
+  actionError.value = null;
+  const ok = await weatherStore.reorderFavorites(ids);
+  reordering.value = false;
+  if (!ok) actionError.value = 'Nie udało się zapisać kolejności ulubionych miast';
+};
+
+const onDragStart = (event, index) => {
+  dragIndex.value = index;
+  event.dataTransfer.effectAllowed = 'move';
+  // Firefox wymaga ustawienia danych, żeby przeciąganie się rozpoczęło
+  event.dataTransfer.setData('text/plain', String(index));
+};
+
+const onDragOver = (index) => {
+  if (dragIndex.value !== null) overIndex.value = index;
+};
+
+const onDrop = (index) => {
+  const from = dragIndex.value;
+  onDragEnd();
+  if (from !== null) moveFavorite(from, index);
+};
+
+const onDragEnd = () => {
+  dragIndex.value = null;
+  overIndex.value = null;
+};
+
+// --- Własna nazwa (alias), np. "Dom", "Działka" ---
+const ALIAS_MAX = 50;
+const editingId = ref(null);
+const aliasDraft = ref('');
+const savingAlias = ref(false);
+const aliasInput = ref(null);
+
+const startAliasEdit = async (city) => {
+  editingId.value = city.openweather_id;
+  aliasDraft.value = city.alias || '';
+  actionError.value = null;
+  await nextTick();
+  const input = Array.isArray(aliasInput.value) ? aliasInput.value[0] : aliasInput.value;
+  input?.focus();
+};
+
+const cancelAliasEdit = () => {
+  editingId.value = null;
+  aliasDraft.value = '';
+};
+
+const saveAlias = async (city) => {
+  if (savingAlias.value) return;
+  savingAlias.value = true;
+  actionError.value = null;
+  try {
+    await weatherStore.setFavoriteAlias(city.openweather_id, aliasDraft.value.slice(0, ALIAS_MAX));
+    cancelAliasEdit();
+  } catch (err) {
+    console.error('Błąd podczas zapisywania nazwy:', err);
+    actionError.value = err.message || 'Nie udało się zapisać nazwy';
+  } finally {
+    savingAlias.value = false;
+  }
+};
+
 watch(() => authStore.user, (newUser) => {
   if (newUser) {
     loadFavorites();
@@ -134,15 +213,47 @@ onMounted(() => {
         </div>
         
         <div class="favorites-list">
-          <div 
-            v-for="city in weatherStore.userFavorites" 
-            :key="city.id" 
-            class="favorite-city-item"
-            @click="selectCity(city)"
+          <div
+            v-for="(city, index) in weatherStore.userFavorites"
+            :key="city.id"
+            :class="['favorite-city-item', {
+              'is-dragging': dragIndex === index,
+              'is-drag-over': overIndex === index && dragIndex !== index
+            }]"
+            :draggable="editingId !== city.openweather_id && !reordering"
+            @dragstart="onDragStart($event, index)"
+            @dragover.prevent="onDragOver(index)"
+            @drop.prevent="onDrop(index)"
+            @dragend="onDragEnd"
+            @click="editingId !== city.openweather_id && selectCity(city)"
           >
+            <span class="drag-handle" title="Przeciągnij, aby zmienić kolejność" aria-hidden="true">⋮⋮</span>
             <div class="favorite-city-info">
-              <span class="favorite-city-name">{{ city.name }}</span>
-              <span class="favorite-city-country">{{ city.country }}</span>
+              <form
+                v-if="editingId === city.openweather_id"
+                class="alias-form"
+                @submit.prevent="saveAlias(city)"
+                @click.stop
+              >
+                <input
+                  ref="aliasInput"
+                  v-model="aliasDraft"
+                  type="text"
+                  class="alias-input"
+                  :maxlength="ALIAS_MAX"
+                  :placeholder="`Własna nazwa, np. Dom (${city.name})`"
+                  aria-label="Własna nazwa miasta"
+                  @keydown.esc.prevent="cancelAliasEdit"
+                />
+                <button type="submit" class="alias-button alias-save" :disabled="savingAlias">
+                  {{ savingAlias ? 'Zapisywanie...' : 'Zapisz' }}
+                </button>
+                <button type="button" class="alias-button" :disabled="savingAlias" @click="cancelAliasEdit">Anuluj</button>
+              </form>
+              <template v-else>
+                <span class="favorite-city-name">{{ city.alias || city.name }}</span>
+                <span class="favorite-city-country">{{ city.alias ? `${city.name}, ${city.country}` : city.country }}</span>
+              </template>
               <div class="favorite-city-weather" v-if="city.current_temp">
                 <span class="temp">{{ formatTemp(city.current_temp) }}</span>
                 <span class="condition" v-if="city.current_condition">{{ city.current_condition }}</span>
@@ -154,19 +265,48 @@ onMounted(() => {
                 />
               </div>
             </div>
-            <button 
-              @click="(event) => showRemoveConfirmation(event, city)"
-              class="remove-favorite-button"
-              title="Usuń z ulubionych"
-              :disabled="isRemoving"
-            >
-              ✕
-            </button>
+            <div class="favorite-actions" @click.stop>
+              <button
+                type="button"
+                class="order-button"
+                title="Przenieś wyżej"
+                aria-label="Przenieś wyżej"
+                :disabled="index === 0 || reordering"
+                @click="moveFavorite(index, index - 1)"
+              >▲</button>
+              <button
+                type="button"
+                class="order-button"
+                title="Przenieś niżej"
+                aria-label="Przenieś niżej"
+                :disabled="index === weatherStore.userFavorites.length - 1 || reordering"
+                @click="moveFavorite(index, index + 1)"
+              >▼</button>
+              <button
+                type="button"
+                class="order-button"
+                title="Zmień nazwę"
+                aria-label="Zmień nazwę"
+                :disabled="editingId === city.openweather_id"
+                @click="startAliasEdit(city)"
+              >✎</button>
+              <button
+                @click="(event) => showRemoveConfirmation(event, city)"
+                class="remove-favorite-button"
+                title="Usuń z ulubionych"
+                :disabled="isRemoving"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         </div>
-        
+
+        <p v-if="actionError" class="favorites-action-error" role="alert">{{ actionError }}</p>
+
         <div class="favorites-info">
           <p class="archive-info">Dane archiwalne są zbierane co 30 minut dla ulubionych miast.</p>
+          <p class="archive-info">Przeciągnij miasto lub użyj strzałek, aby zmienić kolejność. ✎ – własna nazwa (np. „Dom”).</p>
         </div>
       </div>
       
@@ -282,6 +422,110 @@ onMounted(() => {
 .favorite-city-info {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.favorite-city-item.is-dragging {
+  opacity: 0.5;
+}
+
+.favorite-city-item.is-drag-over {
+  box-shadow: inset 0 0 0 2px #3b82f6;
+}
+
+.drag-handle {
+  color: #93c5fd;
+  cursor: grab;
+  font-size: 1rem;
+  letter-spacing: -0.15em;
+  margin-right: 0.75rem;
+  user-select: none;
+}
+
+.favorite-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
+.order-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.order-button:hover:not(:disabled) {
+  color: #1e40af;
+  background-color: #eff6ff;
+}
+
+.order-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.alias-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.alias-form .alias-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 0.375rem 0.5rem;
+}
+
+.alias-button {
+  padding: 0.375rem 0.75rem;
+  border: none;
+  border-radius: 0.375rem;
+  background-color: #f3f4f6;
+  color: #4b5563;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.alias-button:hover:not(:disabled) {
+  background-color: #e5e7eb;
+}
+
+.alias-save {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.alias-save:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.alias-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.favorites-action-error {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
 }
 
 .favorite-city-name {

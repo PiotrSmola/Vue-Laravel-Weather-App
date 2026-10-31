@@ -285,6 +285,7 @@ class AirQualityTest extends TestCase
             ->filter(fn ($event) => str_contains($event->command ?? '', 'air:update'));
 
         $this->assertCount(1, $events);
-        $this->assertSame('0 * * * *', $events->first()->expression);
+        // 15. minuta - nie nakłada się na weather:update (co 30 min od pełnej godziny)
+        $this->assertSame('15 * * * *', $events->first()->expression);
     }
 }

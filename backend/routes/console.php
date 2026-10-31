@@ -22,7 +22,8 @@ Schedule::command('weather:update')
     ->appendOutputTo(storage_path('logs/weather-update.log'));
 
 // Aktualizacja jakości powietrza dla ulubionych i domyślnych miast co godzinę
+// (w 15. minucie, żeby nie nakładała się na weather:update i nie przekroczyła limitu API)
 Schedule::command('air:update')
-    ->hourly()
+    ->hourlyAt(15)
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/air-update.log'));

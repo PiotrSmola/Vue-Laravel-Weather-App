@@ -10,6 +10,7 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 /**
@@ -18,6 +19,9 @@ use Throwable;
  */
 class OpenWeatherClient
 {
+    // Wspólny (cache) licznik zapytań wychodzących do API - limit darmowego planu: 60/min
+    public const RATE_LIMIT_KEY = 'openweather-outgoing';
+
     public function __construct(
         protected string $apiKey,
         protected string $baseUrl = 'https://api.openweathermap.org',
@@ -68,6 +72,8 @@ class OpenWeatherClient
      */
     public function get(string $path, array $query = []): array
     {
+        $this->acquire($path);
+
         try {
             $response = $this->request()->get($this->url($path), $this->withKey($query));
         } catch (ConnectionException $e) {
@@ -88,8 +94,21 @@ class OpenWeatherClient
             return [];
         }
 
-        $responses = Http::pool(function (Pool $pool) use ($requests) {
-            foreach ($requests as $key => [$path, $query]) {
+        // Każde zapytanie z puli zużywa limit osobno; te ponad limit nie są wysyłane
+        $limited = [];
+
+        foreach ($requests as $key => [$path]) {
+            try {
+                $this->acquire($path);
+            } catch (WeatherApiException $e) {
+                $limited[$key] = true;
+            }
+        }
+
+        $toSend = array_diff_key($requests, $limited);
+
+        $responses = empty($toSend) ? [] : Http::pool(function (Pool $pool) use ($toSend) {
+            foreach ($toSend as $key => [$path, $query]) {
                 $pool->as((string) $key)
                     ->timeout($this->timeout)
                     ->acceptJson()
@@ -100,6 +119,11 @@ class OpenWeatherClient
         $results = [];
 
         foreach ($requests as $key => [$path]) {
+            if (isset($limited[$key])) {
+                $results[$key] = null;
+                continue;
+            }
+
             $response = $responses[(string) $key] ?? null;
 
             try {
@@ -119,17 +143,68 @@ class OpenWeatherClient
 
     protected function request(): PendingRequest
     {
+        $retried429 = false;
+
         return Http::acceptJson()
             ->timeout($this->timeout)
-            ->retry($this->retryTimes, $this->retrySleep, function (Throwable $e) {
-                // Ponawiamy tylko błędy połączenia, 429 i 5xx - 4xx (np. 404) nie ma sensu powtarzać
+            ->retry($this->retryTimes, $this->retrySleep, function (Throwable $e) use (&$retried429) {
+                // Ponawiamy tylko błędy połączenia, 429 (najwyżej raz) i 5xx - 4xx (np. 404) nie ma sensu powtarzać.
+                // Każde ponowienie zużywa limit zapytań - bez wolnego limitu nie ponawiamy.
                 if ($e instanceof ConnectionException) {
-                    return true;
+                    return $this->tryAcquire();
                 }
 
-                return $e instanceof RequestException
-                    && ($e->response->serverError() || $e->response->status() === 429);
+                if (!$e instanceof RequestException) {
+                    return false;
+                }
+
+                if ($e->response->status() === 429) {
+                    if ($retried429) {
+                        return false;
+                    }
+                    $retried429 = true;
+
+                    return $this->tryAcquire();
+                }
+
+                return $e->response->serverError() && $this->tryAcquire();
             }, throw: false);
+    }
+
+    // Limit zapytań wychodzących na minutę (config weather.rate_limit_per_minute; 0 = bez limitu)
+    protected function rateLimit(): int
+    {
+        return (int) config('weather.rate_limit_per_minute', 50);
+    }
+
+    /**
+     * Rezerwuje jedno zapytanie z limitu lub rzuca WeatherApiException (status 429) bez wysyłania zapytania.
+     *
+     * @throws WeatherApiException
+     */
+    protected function acquire(string $path): void
+    {
+        if (!$this->tryAcquire()) {
+            Log::warning('OpenWeatherMap: wyczerpany limit zapytań na minutę (' . $path . ')');
+            throw new WeatherApiException('Przekroczono limit zapytań do API OpenWeatherMap', 429);
+        }
+    }
+
+    protected function tryAcquire(): bool
+    {
+        $limit = $this->rateLimit();
+
+        if ($limit <= 0) {
+            return true;
+        }
+
+        if (RateLimiter::tooManyAttempts(self::RATE_LIMIT_KEY, $limit)) {
+            return false;
+        }
+
+        RateLimiter::hit(self::RATE_LIMIT_KEY, 60);
+
+        return true;
     }
 
     protected function decode(string $path, Response $response): array
