@@ -27,6 +27,22 @@ return [
 
     'favorites_limit' => (int) env('WEATHER_FAVORITES_LIMIT', 10),
 
+    // Mapa pogodowa: proxy kafelków OpenWeather (klucz API nie trafia do przeglądarki)
+    'map' => [
+        'tiles_url' => env('WEATHER_TILES_URL', 'https://tile.openweathermap.org'),
+        'layers' => ['temp_new', 'precipitation_new', 'clouds_new', 'wind_new', 'pressure_new'],
+        'max_zoom' => 12,
+        'tile_cache_minutes' => (int) env('WEATHER_TILE_CACHE_MINUTES', 30),
+        // Magazyn cache dla kafelków (binarne PNG) - domyślnie pliki
+        'tile_cache_store' => env('WEATHER_TILE_CACHE_STORE', 'file'),
+        // Limit zapytań o kafelki na minutę (na adres IP)
+        'tile_rate_limit' => (int) env('WEATHER_TILE_RATE_LIMIT', 300),
+    ],
+
+    // One Call API 3.0 (wymaga osobnej subskrypcji) - domyślnie wyłączone
+    'onecall_enabled' => (bool) env('WEATHER_ONECALL_ENABLED', false),
+    'onecall_cache_minutes' => (int) env('WEATHER_ONECALL_CACHE', 30),
+
     // Dane historyczne: domyślny i maksymalny zakres (w dniach)
     'history_default_days' => 7,
     'history_max_days' => 366,
