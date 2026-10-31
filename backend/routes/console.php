@@ -27,3 +27,10 @@ Schedule::command('air:update')
     ->hourlyAt(15)
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/air-update.log'));
+
+// Alerty prognozy (deszcz jutro, przymrozek) dla miast z aktywnymi regułami co 3 godziny
+// (w 45. minucie, żeby nie nakładały się na weather:update i air:update)
+Schedule::command('alerts:forecast')
+    ->cron('45 */3 * * *')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/alerts-forecast.log'));

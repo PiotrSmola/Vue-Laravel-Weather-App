@@ -42,7 +42,6 @@ services:
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
-    image: weather-app-backend
     restart: unless-stopped
     environment:
       <<: *backend-env
@@ -68,7 +67,6 @@ services:
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
-    image: weather-app-backend
     restart: unless-stopped
     environment:
       <<: *backend-env
@@ -87,7 +85,6 @@ services:
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
-    image: weather-app-backend
     restart: unless-stopped
     environment:
       <<: *backend-env

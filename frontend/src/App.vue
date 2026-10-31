@@ -4,6 +4,8 @@ import { useAuthStore } from "./stores/auth";
 import { ref, computed } from "vue";
 import { visibleNavigation } from "./navigation";
 import EmailVerificationBanner from "./components/EmailVerificationBanner.vue";
+import OfflineBanner from "./components/OfflineBanner.vue";
+import AlertsBell from "./components/alerts/AlertsBell.vue";
 
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
@@ -41,6 +43,8 @@ const closeMobileMenu = () => {
               <span class="logo-icon">☁️</span>
               <span class="logo-text">Poland&World Weather</span>
             </RouterLink>
+
+            <AlertsBell mobile />
             
             <button 
               class="mobile-menu-btn" 
@@ -82,6 +86,7 @@ const closeMobileMenu = () => {
             </RouterLink>
             
             <div v-if="authStore.user" class="user-nav">
+              <AlertsBell />
               <RouterLink :to="{ name: 'account' }" class="user-greeting">
                 Witaj, {{ authStore.user.name }}
               </RouterLink>
@@ -152,6 +157,7 @@ const closeMobileMenu = () => {
         </div>
       </nav>
     </header>
+    <OfflineBanner />
 
     <EmailVerificationBanner />
 

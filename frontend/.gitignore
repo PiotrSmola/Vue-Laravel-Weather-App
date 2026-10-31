@@ -28,3 +28,6 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+
+# Service worker generowany przez vite-plugin-pwa w trybie dev
+dev-dist
