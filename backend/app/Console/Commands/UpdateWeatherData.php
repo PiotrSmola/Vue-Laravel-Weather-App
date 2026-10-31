@@ -3,11 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Exceptions\WeatherApiException;
-use App\Models\City;
 use App\Services\OpenWeatherClient;
 use App\Services\WeatherService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 
@@ -22,14 +20,7 @@ class UpdateWeatherData extends Command
     public function handle(WeatherService $weather, OpenWeatherClient $client)
     {
         // Suma: wszystkie miasta w ulubionych + miasta domyślne z config/weather.php
-        $favoriteIds = City::whereIn('id', DB::table('user_cities')->select('city_id'))
-            ->pluck('openweather_id')
-            ->map(fn ($id) => (int) $id);
-
-        $openweatherIds = $favoriteIds
-            ->merge(array_map('intval', config('weather.default_cities', [])))
-            ->unique()
-            ->values();
+        $openweatherIds = $weather->openweatherIdsToUpdate();
 
         if ($openweatherIds->isEmpty()) {
             $this->info('Brak miast do aktualizacji.');
