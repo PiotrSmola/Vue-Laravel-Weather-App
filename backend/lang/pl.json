@@ -1,0 +1,9 @@
+{
+    "(and :count more error)": "(i jeszcze :count błąd)",
+    "(and :count more errors)": "(i jeszcze :count błąd)|(i jeszcze :count błędy)|(i jeszcze :count błędów)",
+    "Hello!": "Witaj!",
+    "Whoops!": "Ups!",
+    "Regards,": "Pozdrawiamy,",
+    "If you're having trouble clicking the \":actionText\" button, copy and paste the URL below\ninto your web browser:": "Jeśli przycisk „:actionText” nie działa, skopiuj poniższy adres i wklej go w pasku przeglądarki:",
+    "All rights reserved.": "Wszelkie prawa zastrzeżone."
+}
