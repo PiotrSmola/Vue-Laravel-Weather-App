@@ -52,6 +52,17 @@ function writeLocal(values) {
   }
 }
 
+// Ustawienie wyłącznie lokalne (nie jest wysyłane do API): "używaj mojej lokalizacji przy starcie"
+const LOCATION_ON_START_KEY = "use_location_on_start";
+
+function readLocationOnStart() {
+  try {
+    return localStorage.getItem(LOCATION_ON_START_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export const useSettingsStore = defineStore("settingsStore", {
   state: () => ({
     ...DEFAULT_SETTINGS,
@@ -61,6 +72,7 @@ export const useSettingsStore = defineStore("settingsStore", {
     loading: false,
     saving: false,
     error: null,
+    use_location_on_start: readLocationOnStart(),
   }),
 
   getters: {
@@ -104,6 +116,15 @@ export const useSettingsStore = defineStore("settingsStore", {
     // Wywoływane po wylogowaniu
     resetToLocal() {
       this.$patch({ ...DEFAULT_SETTINGS, ...readLocal(), source: "local", error: null });
+    },
+
+    setUseLocationOnStart(value) {
+      this.use_location_on_start = !!value;
+      try {
+        localStorage.setItem(LOCATION_ON_START_KEY, value ? "1" : "0");
+      } catch {
+        // brak dostępu do localStorage – ustawienie obowiązuje do odświeżenia strony
+      }
     },
 
     // Częściowa aktualizacja, np. update({ units: "imperial" })
